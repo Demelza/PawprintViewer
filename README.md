@@ -20,16 +20,21 @@ Radegast is a virtual world client compatible with Second Life and OpenSimulator
 Its main purpose is to provide an alternative client to Linden Lab derived virtual world viewers.
 There is a strong focus on accessability and non-3D interaction.
 
-This repository builds two clients:
+This repository builds three clients:
 
 * **Radegast** (aka "Legacy") - the original WinForms client, Windows-only.
 * **RadegastVeles** (aka "Veles") - a cross-platform Avalonia-based rewrite, for Windows, macOS, and Linux.
+* **Radegast.Gtk** - an experimental GTK3 client for Linux, focused on multiple accounts and text interaction.
 
 ### Prerequisites
 
 Radegast (Legacy) requires .NET Framework 4.8 or compatible Mono version to build and run.
 
 RadegastVeles (Veles) requires the .NET 10 runtime and builds/runs on Windows, macOS, and Linux.
+
+Radegast.Gtk requires .NET 10 and the GTK3 runtime on Linux. Build and run it with
+`dotnet run --project Radegast.Gtk/Radegast.Gtk.csproj`. Its current features and
+limitations are listed in [Radegast.Gtk/README.md](Radegast.Gtk/README.md).
 
 ### macOS notes
 
