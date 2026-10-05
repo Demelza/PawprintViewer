@@ -23,7 +23,9 @@ applied.
 ```
 
 - The left rail shows logged-in accounts and keeps the add-account button at
-  its bottom. It shows connection state and unread activity per account.
+  its bottom. It shows connection state and unread activity per account. Each
+  account has its name and logout button on one line, a full-width location
+  line below, and a balance line formatted like `69,420 L$`.
 - The central tab strip belongs to the selected account. Initial tabs are
   Nearby Chat, IMs, Group Chats, Inventory, Attachments, and Friends.
 - The right pane always shows nearby avatars for the selected account, ordered

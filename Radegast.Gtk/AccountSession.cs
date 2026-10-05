@@ -31,6 +31,7 @@ internal sealed class AccountSession : IDisposable
     public NetCom Net { get; }
     public string Name { get; private set; } = "Connecting…";
     public string Status { get; private set; } = "Connecting…";
+    public int? Balance { get; private set; }
     public bool IsConnected => Net.IsLoggedIn;
     public IReadOnlyList<NearbyResident> Nearby => _nearby;
 
@@ -53,6 +54,7 @@ internal sealed class AccountSession : IDisposable
         Net.ClientDisconnected += OnDisconnected;
         Net.ClientLoggedOut += OnLoggedOut;
         Net.ChatReceived += OnChatReceived;
+        Net.MoneyBalanceUpdated += OnMoneyBalanceUpdated;
         Client.Self.ScriptDialog += OnScriptDialog;
         Client.Self.ScriptQuestion += OnScriptQuestion;
         Client.Self.IM += OnInstantMessage;
@@ -225,6 +227,17 @@ internal sealed class AccountSession : IDisposable
             Net.LoginOptions.MfaHash = reply.MfaHash;
     }
 
+    private void OnMoneyBalanceUpdated(object? sender, BalanceEventArgs e)
+    {
+        var balance = e.Balance;
+        GtkDispatch.Post(() =>
+        {
+            if (_disposed) return;
+            Balance = balance;
+            StateChanged?.Invoke(this);
+        });
+    }
+
     private void OnDisconnected(object? sender, DisconnectedEventArgs e) =>
         GtkDispatch.Post(() => SetDisconnected("Disconnected"));
 
@@ -349,6 +362,7 @@ internal sealed class AccountSession : IDisposable
         Net.ClientDisconnected -= OnDisconnected;
         Net.ClientLoggedOut -= OnLoggedOut;
         Net.ChatReceived -= OnChatReceived;
+        Net.MoneyBalanceUpdated -= OnMoneyBalanceUpdated;
         Rlv.Message -= OnRlvMessage;
         Rlv.Changed -= OnRlvChanged;
         Client.Self.ScriptDialog -= OnScriptDialog;

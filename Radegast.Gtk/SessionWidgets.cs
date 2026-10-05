@@ -1,4 +1,5 @@
 using Gtk;
+using System.Globalization;
 
 namespace Radegast.Gtk;
 
@@ -14,6 +15,7 @@ internal sealed class SessionWidgets : IDisposable
     private readonly RlvPanel _rlvPanel;
     private readonly Stack _inventoryPages = new();
     private readonly Label _locationLabel = new() { Xalign = 0, MarginStart = 8, Ellipsize = Pango.EllipsizeMode.End };
+    private readonly Label _balanceLabel = new() { Xalign = 0, MarginStart = 8, Ellipsize = Pango.EllipsizeMode.End };
     private bool _disposed;
 
     public Box Root { get; }
@@ -27,15 +29,17 @@ internal sealed class SessionWidgets : IDisposable
     {
         _session = session;
 
-        AccountRow = new Box(Orientation.Horizontal, 3);
+        AccountRow = new Box(Orientation.Vertical, 2);
         AccountButton = new Button(session.Name) { TooltipText = "Select account" };
         LogoutButton = new Button("×") { TooltipText = "Log out this account" };
-        var accountInfo = new Box(Orientation.Vertical, 2);
-        accountInfo.PackStart(AccountButton, false, false, 0);
-        accountInfo.PackStart(_locationLabel, false, false, 0);
-        AccountRow.PackStart(accountInfo, true, true, 0);
-        AccountRow.PackStart(LogoutButton, false, false, 0);
+        var accountHeader = new Box(Orientation.Horizontal, 3);
+        accountHeader.PackStart(AccountButton, true, true, 0);
+        accountHeader.PackStart(LogoutButton, false, false, 0);
+        AccountRow.PackStart(accountHeader, false, false, 0);
+        AccountRow.PackStart(_locationLabel, false, false, 0);
+        AccountRow.PackStart(_balanceLabel, false, false, 0);
         UpdateLocation();
+        UpdateBalance();
         GLib.Timeout.Add(1000, () =>
         {
             if (_disposed) return false;
@@ -156,7 +160,12 @@ internal sealed class SessionWidgets : IDisposable
         AccountButton.Label = $"{(selected ? "› " : "")}{_session.Name}{unread}";
         AccountButton.TooltipText = _session.Status;
         UpdateLocation();
+        UpdateBalance();
     }
+
+    private void UpdateBalance() => _balanceLabel.Text = _session.Balance is { } balance
+        ? $"{balance.ToString("N0", CultureInfo.InvariantCulture)} L$"
+        : "… L$";
 
     private void UpdateLocation()
     {

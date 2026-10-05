@@ -24,7 +24,9 @@ attempt; this version does not store credentials.
   list for the selected account.
 - Multiple connected accounts in one process. Switching accounts preserves
   each session's selected tab and chat transcript. The account rail shows each
-  avatar's current region and local coordinates.
+  avatar's current region and local coordinates across the full row, with its
+  balance below (for example, `69,420 L$`). Balances update automatically. The
+  logout button sits beside the avatar name and matches its button height.
 - Nearby chat send/receive, and a distance-sorted list of nearby avatars from
   the current simulator's coarse-location updates. Use `/9 testcommand on` to
   send `testcommand on` on channel 9; signed channel numbers are accepted, and
