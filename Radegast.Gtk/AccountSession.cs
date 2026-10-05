@@ -14,13 +14,14 @@ internal sealed record ScriptMenu(UUID ObjectId, string ObjectName, string Owner
 }
 
 /// <summary>A single grid connection. All public events are delivered on the GTK thread.</summary>
-internal sealed class AccountSession : IDisposable
+internal sealed partial class AccountSession : IDisposable
 {
     private static readonly Regex ChatChannelPrefix = new(@"^/(?<channel>[+-]?[0-9]+)\s*(?<message>[\s\S]*)$", RegexOptions.CultureInvariant);
     private readonly Dictionary<UUID, string> _names = new();
     private readonly HashSet<UUID> _requestedNames = new();
     private readonly object _nameLock = new();
     private readonly SeatAnimationController _seatAnimations;
+    private readonly Action<Action> _post;
     private List<NearbyResident> _nearby = new();
     private bool _disposed;
 
@@ -44,9 +45,10 @@ internal sealed class AccountSession : IDisposable
 
     public AccountSession(Action<Action>? post = null)
     {
+        _post = post ?? GtkDispatch.Post;
         _seatAnimations = new SeatAnimationController(Client);
         Outfit = new CurrentOutfitFolder(Client);
-        Rlv = new RlvSession(Client, Outfit, post ?? GtkDispatch.Post);
+        Rlv = new RlvSession(Client, Outfit, _post);
         Rlv.Message += OnRlvMessage;
         Rlv.Changed += OnRlvChanged;
         Net = new NetCom(Client);
@@ -61,6 +63,7 @@ internal sealed class AccountSession : IDisposable
         Client.Grid.CoarseLocationUpdate += OnCoarseLocationUpdate;
         Client.Avatars.UUIDNameReply += OnNameReply;
         Client.Network.RegisterLoginResponseCallback(OnLoginResponse);
+        InitializeFriends();
     }
 
     public void Login(string username, string password, Grid grid, StartLocationType startLocation, string mfaToken = "")
@@ -171,7 +174,7 @@ internal sealed class AccountSession : IDisposable
             .Where(part => !string.IsNullOrWhiteSpace(part)));
         var menu = new ScriptMenu(e.ObjectID, e.ObjectName, owner, e.Message,
             e.Channel, e.ButtonLabels.ToArray()) { OwnerId = e.OwnerID };
-        GtkDispatch.Post(() =>
+        _post(() =>
         {
             if (!_disposed) ScriptDialogReceived?.Invoke(this, menu);
         });
@@ -191,7 +194,7 @@ internal sealed class AccountSession : IDisposable
             Client.Self.ScriptQuestionReply(e.Simulator, e.ItemID, e.TaskID, e.Questions);
             return;
         }
-        GtkDispatch.Post(() => { if (!_disposed) PermissionRequested?.Invoke(this, e); });
+        _post(() => { if (!_disposed) PermissionRequested?.Invoke(this, e); });
     }
 
     private void OnInstantMessage(object? sender, InstantMessageEventArgs e)
@@ -209,7 +212,7 @@ internal sealed class AccountSession : IDisposable
         var status = e.Status;
         var message = e.Message;
         var reason = e.FailReason;
-        GtkDispatch.Post(() =>
+        _post(() =>
         {
             if (_disposed) return;
             Status = status == LoginStatus.Success ? "Connected" :
@@ -230,7 +233,7 @@ internal sealed class AccountSession : IDisposable
     private void OnMoneyBalanceUpdated(object? sender, BalanceEventArgs e)
     {
         var balance = e.Balance;
-        GtkDispatch.Post(() =>
+        _post(() =>
         {
             if (_disposed) return;
             Balance = balance;
@@ -239,10 +242,10 @@ internal sealed class AccountSession : IDisposable
     }
 
     private void OnDisconnected(object? sender, DisconnectedEventArgs e) =>
-        GtkDispatch.Post(() => SetDisconnected("Disconnected"));
+        _post(() => SetDisconnected("Disconnected"));
 
     private void OnLoggedOut(object? sender, EventArgs e) =>
-        GtkDispatch.Post(() => SetDisconnected("Logged out"));
+        _post(() => SetDisconnected("Logged out"));
 
     private void SetDisconnected(string status)
     {
@@ -252,6 +255,7 @@ internal sealed class AccountSession : IDisposable
         Rlv.SetEnabled(false);
         if (enabled) Rlv.SetEnabled(true);
         _nearby.Clear();
+        lock (_nameLock) _requestedFriendNames.Clear();
         StateChanged?.Invoke(this);
         NearbyChanged?.Invoke(this);
     }
@@ -261,7 +265,7 @@ internal sealed class AccountSession : IDisposable
         if (e.Message == null || e.Type == ChatType.StartTyping || e.Type == ChatType.StopTyping)
             return;
         if (Rlv.TryHandleChat(e)) return;
-        GtkDispatch.Post(() =>
+        _post(() =>
         {
             if (_disposed) return;
             var permissions = Rlv.Service.Permissions;
@@ -325,7 +329,7 @@ internal sealed class AccountSession : IDisposable
         }
 
         nearby.Sort((a, b) => a.Distance.CompareTo(b.Distance));
-        GtkDispatch.Post(() =>
+        _post(() =>
         {
             if (_disposed) return;
             _nearby = nearby;
@@ -339,18 +343,22 @@ internal sealed class AccountSession : IDisposable
     private void OnNameReply(object? sender, UUIDNameReplyEventArgs e)
     {
         var resolved = e.Names.ToArray();
-        GtkDispatch.Post(() =>
+        _post(() =>
         {
             if (_disposed) return;
             lock (_nameLock)
             {
                 foreach (var (id, name) in resolved)
+                {
                     _names[id] = name;
+                    _requestedFriendNames.Remove(id);
+                }
                 _nearby = _nearby.Select(person =>
                     _names.TryGetValue(person.Id, out var name)
                         ? person with { Name = name } : person).ToList();
             }
             NearbyChanged?.Invoke(this);
+            if (resolved.Any(name => Client.Friends.FriendList.ContainsKey(name.Key))) FriendsChanged?.Invoke(this);
         });
     }
 
@@ -358,6 +366,7 @@ internal sealed class AccountSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        StopFriends();
         Net.ClientLoginStatus -= OnLoginProgress;
         Net.ClientDisconnected -= OnDisconnected;
         Net.ClientLoggedOut -= OnLoggedOut;

@@ -34,6 +34,18 @@ attempt; this version does not store credentials.
   send `testcommand on` on channel 9; signed channel numbers are accepted, and
   `/0 message` sends public chat. Channel commands respect RLV channel locks.
 - Account-specific logout and unread nearby-chat counts for background accounts.
+- Friends are listed with online residents first, alphabetically within each
+  group, and a small online indicator. Names and online status update as replies
+  arrive; friendship additions/removals also update the list.
+- Each friend has **IM**, **Pay**, and **Offer TP** buttons to the left of their
+  name. IM is disabled until the IM tab is implemented. Pay opens a separate
+  **Pay**/**Dismiss** window with a digits-only amount field. Only positive whole
+  amounts are accepted; amounts over the known balance and invalid/stale
+  recipients are rejected. A payment window sends once and closes after the
+  request; server confirmations or failures appear in that account's Nearby
+  Chat, and the balance updates from the server's reply.
+- Offer TP sends that account's current location to the friend. When RLV hides
+  location, offers are available only to friends already granted map rights.
 - Inventory folder browsing, item details, and per-folder refresh. Folders load
   when opened. The Library is shown when the grid provides it.
 - **Search all** fetches My Inventory folders on demand, then searches their
@@ -123,7 +135,7 @@ For furniture, use two seats with different animations and test both an RLV
 furniture switch and standing. Check from another viewer that the old pose
 stops, the new pose plays, and attachment/AO animations remain active.
 
-The IMs, Group Chats, and Friends tabs currently show placeholders.
+The IMs and Group Chats tabs currently show placeholders.
 Inventory item content editors, previews, rez actions, desktop
 notifications, and notification sounds are also pending.
 The [GTK3 client plan](../docs/Gtk3ClientPlan.md) tracks the intended scope.

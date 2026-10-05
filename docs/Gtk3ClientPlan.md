@@ -86,6 +86,23 @@ replies. See the
 [GTK README](../Radegast.Gtk/README.md#rlv--rlva) for supported features,
 limitations, and the regression-check command.
 
+## Friends checkpoint
+
+The Friends tab uses the same scrolling row layout as Attachments. Each row has
+**IM**, **Pay**, and **Offer TP** buttons before the resident's name. Online
+friends appear first with a small indicator; both online and offline groups
+are ordered alphabetically. Name replies, status notifications, and friendship
+changes refresh the appropriate account's list.
+
+IM remains disabled while the IM tab is pending. Pay opens a compact separate
+window bound to its original account and friend, with a digits-only amount field
+and Pay/Dismiss buttons. Positive whole amounts are checked against the known
+balance, and stale recipients/disconnected accounts cannot send payments.
+Submission sends once, closes the window, and reports subsequent server payment
+replies in that account's Nearby Chat. Closing a payment window or logging out
+does not send money. Offer TP uses the originating account's current location
+and respects RLV location restrictions and the friend's granted map rights.
+
 ## First working checkpoint
 
 Two accounts can log in concurrently in one window, switch without disconnecting,

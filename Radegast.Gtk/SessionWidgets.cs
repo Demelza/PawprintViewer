@@ -12,6 +12,7 @@ internal sealed class SessionWidgets : IDisposable
     private readonly ListBox _nearbyList;
     private readonly InventoryPanel _inventoryPanel;
     private readonly AttachmentsPanel _attachmentsPanel;
+    private readonly FriendsPanel _friendsPanel;
     private readonly RlvPanel _rlvPanel;
     private readonly Stack _inventoryPages = new();
     private readonly Label _locationLabel = new() { Xalign = 0, MarginStart = 8, Ellipsize = Pango.EllipsizeMode.End };
@@ -93,7 +94,8 @@ internal sealed class SessionWidgets : IDisposable
         Tabs.AppendPage(_inventoryPages, new Label("Inventory"));
         _attachmentsPanel = new AttachmentsPanel(session);
         Tabs.AppendPage(_attachmentsPanel, new Label("Attachments"));
-        AddPendingTab("Friends");
+        _friendsPanel = new FriendsPanel(session);
+        Tabs.AppendPage(_friendsPanel, new Label("Friends"));
         _rlvPanel = new RlvPanel(session.Rlv);
         Tabs.AppendPage(_rlvPanel, new Label("RLV"));
         session.Rlv.Changed += UpdateRestrictions;
@@ -101,6 +103,7 @@ internal sealed class SessionWidgets : IDisposable
         {
             if (Tabs.CurrentPage == 3 && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
             if (Tabs.CurrentPage == 4) _attachmentsPanel.StartLoading();
+            if (Tabs.CurrentPage == 5) _friendsPanel.StartLoading();
         });
         UpdateRestrictions();
     }
@@ -210,5 +213,6 @@ internal sealed class SessionWidgets : IDisposable
         _rlvPanel.Stop();
         _inventoryPanel.Stop();
         _attachmentsPanel.Stop();
+        _friendsPanel.Stop();
     }
 }

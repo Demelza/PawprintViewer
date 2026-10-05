@@ -1,6 +1,7 @@
 using System.Net;
 using System.Reflection;
 using System.Threading.Channels;
+using System.Collections.Concurrent;
 using LibreMetaverse;
 using LibreMetaverse.Appearance;
 using LibreMetaverse.Packets;
@@ -10,6 +11,158 @@ using Radegast.Gtk;
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Friends sort online first and alphabetically within each group", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        f.Friend("Zelda Resident", true);
+        f.Friend("alice Resident", true);
+        f.Friend("Aaron Resident");
+        f.Friend("Zorro Resident");
+        Check(session.Friends.Select(friend => friend.Name).SequenceEqual(new[]
+            { "alice Resident", "Zelda Resident", "Aaron Resident", "Zorro Resident" }), "Friend ordering is incorrect");
+        Check(session.Friends.Select(friend => friend.IsOnline).SequenceEqual(new[] { true, true, false, false }),
+            "Online state was lost in the roster");
+        return Task.CompletedTask;
+    }),
+    ("Name and online notifications update the correct account's friend roster", async () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var other = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        using var g = new Fixture(other);
+        var friend = f.Friend("");
+        g.Friend("Other Resident", id: friend.UUID);
+        await FriendsEvent(session, () => f.Receive(new UUIDNameReplyPacket
+        {
+            UUIDNameBlock = new[] { new UUIDNameReplyPacket.UUIDNameBlockBlock
+                { ID = friend.UUID, FirstName = Utils.StringToBytes("Alice"), LastName = Utils.StringToBytes("Resident") } }
+        }));
+        Check(session.Friends.Single().Name == "Alice Resident", "An initially empty friend name did not update");
+        await FriendsEvent(session, () => f.Receive(new OnlineNotificationPacket
+        {
+            AgentBlock = new[] { new OnlineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } }
+        }));
+        Check(session.Friends.Single().IsOnline, "The online notification was not reflected");
+        Check(other.Friends.Single().Name == "Other Resident" && !other.Friends.Single().IsOnline,
+            "The name or online state leaked into another account");
+        await FriendsEvent(session, () => f.Receive(new OfflineNotificationPacket
+        {
+            AgentBlock = new[] { new OfflineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } }
+        }));
+        Check(!session.Friends.Single().IsOnline, "The offline notification was not reflected");
+        await FriendsEvent(session, () => f.Receive(new TerminateFriendshipPacket
+        {
+            ExBlock = { OtherID = friend.UUID }
+        }));
+        Check(session.Friends.Count == 0 && other.Friends.Count == 1, "A terminated friendship was not removed from its account");
+    }),
+    ("Friend payments use the originating account, recipient and exact whole amount", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var other = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        using var g = new Fixture(other);
+        var friend = f.Friend("Recipient Resident");
+        var packets = f.CapturePackets();
+        var otherPackets = g.CapturePackets();
+        SetConnected(session, true);
+        try
+        {
+            session.PayFriend(friend.UUID, 1234);
+            var payment = packets().OfType<MoneyTransferRequestPacket>().Single();
+            Check(payment.Header.Reliable && payment.AgentData.AgentID == f.Owner && payment.MoneyData.SourceID == f.Owner &&
+                payment.MoneyData.DestID == friend.UUID && payment.MoneyData.Amount == 1234 &&
+                payment.MoneyData.TransactionType == (int)MoneyTransactionType.Gift && payment.MoneyData.Flags == (byte)TransactionFlags.None,
+                "Payment changed the recipient, amount, transaction type or account");
+            Check(!otherPackets().OfType<MoneyTransferRequestPacket>().Any(), "A payment was sent from another account");
+        }
+        finally { SetConnected(session, false); }
+        return Task.CompletedTask;
+    }),
+    ("Invalid payment amounts, stale recipients and disconnected accounts send no money", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var friend = f.Friend("Recipient Resident");
+        var packets = f.CapturePackets();
+        foreach (var input in new[] { "", "0", "-1", "+1", "1.5", "1e3", "1,000", " 1", "１２", "2147483648", "123456789012345" })
+            Check(!AccountSession.TryParsePaymentAmount(input, out _), $"An invalid payment amount was accepted: {input}");
+        Check(AccountSession.TryParsePaymentAmount("0012", out var parsed) && parsed == 12, "A valid whole amount was rejected");
+        ExpectRejected(() => session.PayFriend(friend.UUID, 10));
+        SetConnected(session, true);
+        try
+        {
+            ExpectRejected(() => session.PayFriend(friend.UUID, 0));
+            ExpectRejected(() => session.PayFriend(friend.UUID, -1));
+            ExpectRejected(() => session.PayFriend(UUID.Zero, 10));
+            ExpectRejected(() => session.PayFriend(UUID.Random(), 10));
+            typeof(AccountSession).GetProperty(nameof(AccountSession.Balance))!.SetValue(session, 5);
+            ExpectRejected(() => session.PayFriend(friend.UUID, 6));
+            f.RemoveFriend(friend.UUID);
+            ExpectRejected(() => session.PayFriend(friend.UUID, 1));
+            Check(!packets().OfType<MoneyTransferRequestPacket>().Any(), "An invalid or stale payment reached the network");
+        }
+        finally { SetConnected(session, false); }
+        return Task.CompletedTask;
+    }),
+    ("Friend teleport offers respect hidden locations and granted map rights", async () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var friend = f.Friend("Recipient Resident", true);
+        var packets = f.CapturePackets();
+        SetConnected(session, true);
+        try
+        {
+            await f.Command("@tplure=n"); // Receiving a lure is a different action from offering one.
+            session.OfferFriendTeleport(friend.UUID);
+            var offer = packets().OfType<StartLurePacket>().Single();
+            Check(offer.AgentData.AgentID == f.Owner && offer.TargetData.Single().TargetID == friend.UUID &&
+                Utils.BytesToString(offer.Info.Message) == "Join me!", "The teleport offer used the wrong account or recipient");
+            await f.Command("@showloc=n");
+            Check(!session.CanOfferFriendTeleport(friend.UUID), "Hidden locations allowed a teleport offer without map rights");
+            ExpectRejected(() => session.OfferFriendTeleport(friend.UUID));
+            Check(!packets().OfType<StartLurePacket>().Any(), "A blocked offer was sent");
+            friend.CanSeeMeOnMap = true;
+            Check(session.CanOfferFriendTeleport(friend.UUID), "A friend with granted map rights could not receive an offer");
+            session.OfferFriendTeleport(friend.UUID);
+            Check(packets().OfType<StartLurePacket>().Single().TargetData.Single().TargetID == friend.UUID, "The permitted offer was not sent");
+        }
+        finally { SetConnected(session, false); }
+        ExpectRejected(() => session.OfferFriendTeleport(friend.UUID));
+    }),
+    ("Server payment replies report confirmation or failure and update the balance", async () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var friend = f.Friend("Recipient Resident");
+        var lines = new List<string>();
+        session.ChatLine += (_, line) => lines.Add(line);
+        async Task Reply(bool success)
+        {
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            void Changed(AccountSession account) => completion.TrySetResult();
+            session.StateChanged += Changed;
+            try
+            {
+                f.Receive(new MoneyBalanceReplyPacket
+                {
+                    MoneyData = { TransactionID = UUID.Random(), TransactionSuccess = success, MoneyBalance = 100,
+                        Description = Utils.StringToBytes(success ? "Payment sent" : "Insufficient funds") },
+                    TransactionInfo = { SourceID = f.Owner, DestID = friend.UUID, Amount = 12,
+                        TransactionType = (int)MoneyTransactionType.Gift, ItemDescription = Array.Empty<byte>() }
+                });
+                await completion.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            }
+            finally { session.StateChanged -= Changed; }
+        }
+        await Reply(true);
+        Check(session.Balance == 100 && lines.Any(line => line.Contains("Payment confirmed: 12 L$ to Recipient Resident")),
+            "Server confirmation or balance update was missing");
+        await Reply(false);
+        Check(lines.Any(line => line.Contains("Payment failed: Insufficient funds")), "A server rejection was not displayed");
+    }),
     ("Standing stops furniture linkset animations and preserves attachment animations", () =>
     {
         using var session = new AccountSession(action => action());
@@ -525,6 +678,22 @@ static void Check(bool condition, string message)
 static void SetConnected(AccountSession session, bool connected) =>
     typeof(Radegast.NetCom).GetProperty(nameof(Radegast.NetCom.IsLoggedIn))!.SetValue(session.Net, connected);
 
+static void ExpectRejected(Action action)
+{
+    try { action(); }
+    catch (Exception ex) when (ex is InvalidOperationException or ArgumentOutOfRangeException) { return; }
+    throw new InvalidOperationException("An invalid friend action was accepted");
+}
+
+static async Task FriendsEvent(AccountSession session, Action change)
+{
+    var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    void Changed(AccountSession account) => completion.TrySetResult();
+    session.FriendsChanged += Changed;
+    try { change(); await completion.Task.WaitAsync(TimeSpan.FromSeconds(3)); }
+    finally { session.FriendsChanged -= Changed; }
+}
+
 sealed class Fixture : IDisposable
 {
     public UUID Owner { get; } = UUID.Random();
@@ -597,6 +766,21 @@ sealed class Fixture : IDisposable
 
     public Task Command(string text, Guid? issuer = null) => Rlv.ProcessCommandAsync(text, issuer ?? _issuer, "Test object");
 
+    private ConcurrentDictionary<UUID, FriendInfo> FriendStore => (ConcurrentDictionary<UUID, FriendInfo>)
+        typeof(FriendsManager).GetField("m_FriendList", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Client.Friends)!;
+
+    public FriendInfo Friend(string name, bool online = false, UUID? id = null)
+    {
+        var friend = (FriendInfo)Activator.CreateInstance(typeof(FriendInfo), BindingFlags.Instance | BindingFlags.NonPublic,
+            null, new object[] { id ?? UUID.Random(), FriendRights.CanSeeOnline, FriendRights.CanSeeOnline }, null)!;
+        friend.Name = name;
+        friend.IsOnline = online;
+        FriendStore[friend.UUID] = friend;
+        return friend;
+    }
+
+    public void RemoveFriend(UUID id) => FriendStore.TryRemove(id, out _);
+
     public Primitive Prim(uint localId, uint parent = 0)
     {
         var primitive = new Primitive { ID = UUID.Random(), LocalID = localId, ParentID = parent };
@@ -622,9 +806,14 @@ sealed class Fixture : IDisposable
             { AnimID = animation.Id, AnimSequenceID = animation.Sequence }).ToArray();
         packet.AnimationSourceList = animations.Select(animation => new AvatarAnimationPacket.AnimationSourceListBlock
             { ObjectID = animation.Source }).ToArray();
+        Receive(packet, simulator);
+    }
+
+    public void Receive(Packet packet, Simulator? simulator = null)
+    {
         var events = (PacketEventDictionary)typeof(NetworkManager).GetField("PacketEvents", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(Client.Network)!;
-        events.InvokeRaiseEvent(packet.Type, packet, simulator);
+        events.InvokeRaiseEvent(packet.Type, packet, simulator ?? Simulator);
     }
 
     public Func<List<Packet>> CapturePackets()
