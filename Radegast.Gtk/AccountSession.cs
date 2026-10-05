@@ -1,4 +1,5 @@
 using LibreMetaverse;
+using LibreMetaverse.Appearance;
 using Radegast;
 
 namespace Radegast.Gtk;
@@ -16,6 +17,7 @@ internal sealed class AccountSession : IDisposable
 
     public string Id { get; } = Guid.NewGuid().ToString("N");
     public GridClient Client { get; } = new();
+    public CurrentOutfitFolder Outfit { get; }
     public NetCom Net { get; }
     public string Name { get; private set; } = "Connecting…";
     public string Status { get; private set; } = "Connecting…";
@@ -29,6 +31,7 @@ internal sealed class AccountSession : IDisposable
 
     public AccountSession()
     {
+        Outfit = new CurrentOutfitFolder(Client);
         Net = new NetCom(Client);
         Net.ClientLoginStatus += OnLoginProgress;
         Net.ClientDisconnected += OnDisconnected;
@@ -188,6 +191,7 @@ internal sealed class AccountSession : IDisposable
         Client.Grid.CoarseLocationUpdate -= OnCoarseLocationUpdate;
         Client.Avatars.UUIDNameReply -= OnNameReply;
         Client.Network.UnregisterLoginResponseCallback(OnLoginResponse);
+        Outfit.Dispose();
         if (Net.IsLoggingIn) Net.CancelLogin();
         if (Net.IsLoggedIn) Net.Logout();
         Net.Dispose();

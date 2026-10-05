@@ -10,6 +10,8 @@ internal sealed class SessionWidgets : IDisposable
     private readonly Entry _chatInput;
     private readonly ListBox _nearbyList;
     private readonly InventoryPanel _inventoryPanel;
+    private readonly Label _locationLabel = new() { Xalign = 0, MarginStart = 8, Ellipsize = Pango.EllipsizeMode.End };
+    private bool _disposed;
 
     public Box Root { get; }
     public Box AccountRow { get; }
@@ -25,8 +27,18 @@ internal sealed class SessionWidgets : IDisposable
         AccountRow = new Box(Orientation.Horizontal, 3);
         AccountButton = new Button(session.Name) { TooltipText = "Select account" };
         LogoutButton = new Button("×") { TooltipText = "Log out this account" };
-        AccountRow.PackStart(AccountButton, true, true, 0);
+        var accountInfo = new Box(Orientation.Vertical, 2);
+        accountInfo.PackStart(AccountButton, false, false, 0);
+        accountInfo.PackStart(_locationLabel, false, false, 0);
+        AccountRow.PackStart(accountInfo, true, true, 0);
         AccountRow.PackStart(LogoutButton, false, false, 0);
+        UpdateLocation();
+        GLib.Timeout.Add(1000, () =>
+        {
+            if (_disposed) return false;
+            UpdateLocation();
+            return true;
+        });
 
         Root = new Box(Orientation.Horizontal, 0);
         Tabs = new Notebook { Scrollable = true };
@@ -131,7 +143,27 @@ internal sealed class SessionWidgets : IDisposable
         var unread = UnreadCount > 0 ? $" ({UnreadCount})" : string.Empty;
         AccountButton.Label = $"{(selected ? "› " : "")}{_session.Name}{unread}";
         AccountButton.TooltipText = _session.Status;
+        UpdateLocation();
     }
 
-    public void Dispose() => _inventoryPanel.Stop();
+    private void UpdateLocation()
+    {
+        var sim = _session.Client.Network.CurrentSim;
+        if (!_session.IsConnected || sim == null)
+        {
+            _locationLabel.Text = _session.Status;
+            _locationLabel.TooltipText = _locationLabel.Text;
+            return;
+        }
+
+        var position = _session.Client.Self.SimPosition;
+        _locationLabel.Text = $"{sim.Name}  ({(int)position.X}, {(int)position.Y}, {(int)position.Z})";
+        _locationLabel.TooltipText = _locationLabel.Text;
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _inventoryPanel.Stop();
+    }
 }

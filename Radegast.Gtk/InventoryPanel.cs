@@ -1,5 +1,6 @@
 using Gtk;
 using LibreMetaverse;
+using System.Text.RegularExpressions;
 using Task = System.Threading.Tasks.Task;
 using Timeout = GLib.Timeout;
 
@@ -12,12 +13,46 @@ internal sealed class InventoryPanel : Box
     private const int TypeColumn = 1;
     private const int IdColumn = 2;
     private const int LibraryColumn = 3;
+    private static readonly HashSet<string> PinnedRootFolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "#Firestorm", "#RLV", "Animations", "Body Parts", "Calling Cards", "Clothing",
+        "Current Outfit", "Favorites", "Gestures", "Landmarks", "Lost And Found",
+        "Materials", "Notecards", "Objects", "Outfits", "Photo Album", "Scripts",
+        "Settings", "Sounds", "Textures", "Trash"
+    };
+    private static readonly AttachmentPoint[] BodyPoints =
+    {
+        AttachmentPoint.Chest, AttachmentPoint.Skull, AttachmentPoint.LeftShoulder,
+        AttachmentPoint.RightShoulder, AttachmentPoint.LeftHand, AttachmentPoint.RightHand,
+        AttachmentPoint.LeftFoot, AttachmentPoint.RightFoot, AttachmentPoint.Spine,
+        AttachmentPoint.Pelvis, AttachmentPoint.Mouth, AttachmentPoint.Chin,
+        AttachmentPoint.LeftEar, AttachmentPoint.RightEar, AttachmentPoint.LeftEyeball,
+        AttachmentPoint.RightEyeball, AttachmentPoint.Nose, AttachmentPoint.RightUpperArm,
+        AttachmentPoint.RightForearm, AttachmentPoint.LeftUpperArm, AttachmentPoint.LeftForearm,
+        AttachmentPoint.RightHip, AttachmentPoint.RightUpperLeg, AttachmentPoint.RightLowerLeg,
+        AttachmentPoint.LeftHip, AttachmentPoint.LeftUpperLeg, AttachmentPoint.LeftLowerLeg,
+        AttachmentPoint.Stomach, AttachmentPoint.LeftPec, AttachmentPoint.RightPec,
+        AttachmentPoint.Neck, AttachmentPoint.Root, AttachmentPoint.LeftHandRing,
+        AttachmentPoint.RightHandRing, AttachmentPoint.TailBase, AttachmentPoint.TailTip,
+        AttachmentPoint.LeftWing, AttachmentPoint.RightWing, AttachmentPoint.Jaw,
+        AttachmentPoint.AltLeftEar, AttachmentPoint.AltRightEar, AttachmentPoint.AltLeftEye,
+        AttachmentPoint.AltRightEye, AttachmentPoint.Tongue, AttachmentPoint.Groin,
+        AttachmentPoint.LeftHindFoot, AttachmentPoint.RightHindFoot
+    };
+    private static readonly AttachmentPoint[] HudPoints =
+    {
+        AttachmentPoint.HUDCenter2, AttachmentPoint.HUDTopRight, AttachmentPoint.HUDTop,
+        AttachmentPoint.HUDTopLeft, AttachmentPoint.HUDCenter, AttachmentPoint.HUDBottomLeft,
+        AttachmentPoint.HUDBottom, AttachmentPoint.HUDBottomRight
+    };
 
     private readonly AccountSession _session;
     private readonly TreeStore _treeModel = new(typeof(string), typeof(string), typeof(string), typeof(bool));
     private readonly TreeView _tree;
+    private readonly TreeViewColumn _typeViewColumn;
     private readonly Stack _resultsStack = new();
     private readonly ListBox _searchResults = new();
+    private readonly List<(Button Button, UUID Id, string Display)> _searchButtons = new();
     private readonly Entry _searchEntry = new() { PlaceholderText = "Search My Inventory…" };
     private readonly Label _status = new("Open a folder to load its contents.") { Xalign = 0 };
     private readonly Label _details = new("Select a folder or item.")
@@ -33,6 +68,7 @@ internal sealed class InventoryPanel : Box
     private readonly HashSet<UUID> _expanded = new();
     private readonly HashSet<UUID> _fetched = new();
     private readonly HashSet<UUID> _fetching = new();
+    private HashSet<UUID> _wornIds = new();
     private CancellationTokenSource? _searchCancel;
     private LibreMetaverse.Inventory? _subscribedStore;
     private UUID _selectedId = UUID.Zero;
@@ -65,15 +101,23 @@ internal sealed class InventoryPanel : Box
         toolbar.PackStart(refreshButton, false, false, 0);
         PackStart(toolbar, false, false, 0);
 
-        var split = new Paned(Orientation.Horizontal);
+        var split = new Box(Orientation.Horizontal, 8);
         PackStart(split, true, true, 0);
 
         _tree = new TreeView(_treeModel) { HeadersVisible = true };
-        _tree.AppendColumn("Name", new CellRendererText(), "text", NameColumn);
-        _tree.AppendColumn("Type", new CellRendererText(), "text", TypeColumn);
+        var nameViewColumn = _tree.AppendColumn("Name", new CellRendererText(), "text", NameColumn);
+        nameViewColumn.Expand = true;
+        _typeViewColumn = _tree.AppendColumn("Type", new CellRendererText(), "text", TypeColumn);
+        _typeViewColumn.Sizing = TreeViewColumnSizing.Fixed;
+        _tree.SizeAllocated += (_, e) =>
+        {
+            var width = Math.Max(1, (int)(e.Allocation.Width * 0.20));
+            if (_typeViewColumn.FixedWidth != width) _typeViewColumn.FixedWidth = width;
+        };
         _tree.RowExpanded += OnRowExpanded;
         _tree.RowCollapsed += OnRowCollapsed;
         _tree.Selection.Changed += (_, _) => OnTreeSelectionChanged();
+        _tree.ButtonPressEvent += OnTreeButtonPress;
         var treeScroll = new ScrolledWindow();
         treeScroll.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
         treeScroll.Add(_tree);
@@ -84,10 +128,14 @@ internal sealed class InventoryPanel : Box
         resultScroll.Add(_searchResults);
         _resultsStack.AddNamed(resultScroll, "search");
         _resultsStack.VisibleChildName = "tree";
-        split.Pack1(_resultsStack, true, false);
+        split.PackStart(_resultsStack, true, true, 0);
 
         var detailPane = new Box(Orientation.Vertical, 8);
-        detailPane.SetSizeRequest(220, -1);
+        split.SizeAllocated += (_, e) =>
+        {
+            var width = Math.Max(1, (int)(e.Allocation.Width * 0.25));
+            if (detailPane.WidthRequest != width) detailPane.WidthRequest = width;
+        };
         detailPane.PackStart(new Label("Item details") { Xalign = 0 }, false, false, 0);
         var detailScroll = new ScrolledWindow();
         detailScroll.SetPolicy(PolicyType.Never, PolicyType.Automatic);
@@ -99,8 +147,7 @@ internal sealed class InventoryPanel : Box
         detailPane.PackStart(_newFolder, false, false, 0);
         detailPane.PackStart(_rename, false, false, 0);
         detailPane.PackStart(_trash, false, false, 0);
-        split.Pack2(detailPane, false, false);
-        split.Position = 440;
+        split.PackStart(detailPane, false, false, 0);
 
         PackEnd(_status, false, false, 0);
         UpdateDetails();
@@ -112,6 +159,8 @@ internal sealed class InventoryPanel : Box
         _active = true;
         Client.Inventory.FolderUpdated += OnFolderUpdated;
         Client.Inventory.ItemReceived += OnItemReceived;
+        Client.Appearance.AppearanceSet += OnAppearanceChanged;
+        Client.Appearance.AgentWearablesReply += OnWearablesChanged;
 
         // The inventory store is created by the login response, sometimes after the
         // session window. Retry briefly without blocking the GTK main loop.
@@ -123,6 +172,12 @@ internal sealed class InventoryPanel : Box
             _expanded.Add(Store.RootFolder.UUID);
             RebuildTree();
             FetchFolder(Store.RootFolder.UUID, false);
+            _ = Task.Run(async () =>
+            {
+                try { await _session.Outfit.GetCurrentOutfitLinksAsync(CancellationToken.None); }
+                catch { return; }
+                GtkDispatch.Post(() => { if (!_disposed) ScheduleRebuild(); });
+            });
             return false;
         });
     }
@@ -153,6 +208,12 @@ internal sealed class InventoryPanel : Box
     private void OnItemReceived(object? sender, ItemReceivedEventArgs e) =>
         GtkDispatch.Post(() => { if (!_disposed) ScheduleRebuild(); });
 
+    private void OnAppearanceChanged(object? sender, AppearanceSetEventArgs e) =>
+        GtkDispatch.Post(() => { if (!_disposed) ScheduleRebuild(); });
+
+    private void OnWearablesChanged(object? sender, AgentWearablesReplyEventArgs e) =>
+        GtkDispatch.Post(() => { if (!_disposed) ScheduleRebuild(); });
+
     private void OnObjectAdded(object? sender, InventoryObjectAddedEventArgs e) =>
         GtkDispatch.Post(() => { if (!_disposed) ScheduleRebuild(); });
 
@@ -179,6 +240,7 @@ internal sealed class InventoryPanel : Box
     {
         var inventory = Store;
         if (inventory?.RootFolder == null) return;
+        RefreshWornState();
         _building = true;
         try
         {
@@ -205,6 +267,7 @@ internal sealed class InventoryPanel : Box
     {
         var type = item is InventoryFolder ? "Folder" : (item as InventoryItem)?.InventoryType.ToString() ?? "Item";
         var label = item.Name ?? "(unnamed)";
+        if (item is InventoryItem inventoryItem && IsWorn(inventoryItem)) label += " (worn)";
         var row = parent.HasValue
             ? _treeModel.AppendValues(parent.Value, label, type, item.UUID.ToString(), isLibrary)
             : _treeModel.AppendValues(label, type, item.UUID.ToString(), isLibrary);
@@ -221,7 +284,10 @@ internal sealed class InventoryPanel : Box
 
         expandedPaths.Add(_treeModel.GetPath(row));
         var children = GetContents(folder.UUID);
-        foreach (var child in children.OrderBy(c => c is InventoryFolder ? 0 : 1)
+        var isMyInventoryRoot = !isLibrary && folder.UUID == Store?.RootFolder?.UUID;
+        foreach (var child in children.OrderBy(c => isMyInventoryRoot && c is InventoryFolder rootFolder &&
+                                                PinnedRootFolders.Contains(rootFolder.Name) ? 0 : 1)
+                     .ThenBy(c => c is InventoryFolder ? 0 : 1)
                      .ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase))
             AddRow(child, row, isLibrary, expandedPaths);
         if (children.Count == 0 && !_fetched.Contains(folder.UUID))
@@ -348,6 +414,124 @@ internal sealed class InventoryPanel : Box
         UpdateDetails();
     }
 
+    private void OnTreeButtonPress(object? sender, ButtonPressEventArgs e)
+    {
+        if (e.Event.Button != 3 ||
+            !_tree.GetPathAtPos((int)e.Event.X, (int)e.Event.Y, out var path, out _, out _, out _)) return;
+        _tree.Selection.SelectPath(path);
+        if (!_treeModel.GetIter(out var row, path)) return;
+        var id = RowId(row);
+        if (id == UUID.Zero) return;
+        ShowContextMenu(id, RowIsLibrary(row), e.Event);
+        e.RetVal = true;
+    }
+
+    private void ShowContextMenu(UUID id, bool isLibrary, Gdk.Event triggerEvent)
+    {
+        if (Store == null || !Store.TryGetValue(id, out InventoryBase? selected)) return;
+        _selectedId = id;
+        _selectedIsLibrary = isLibrary;
+        RefreshWornState();
+        UpdateDetails();
+
+        var menu = new Menu();
+        if (selected is InventoryFolder folder)
+        {
+            if (IsRootTrash(folder) && !isLibrary)
+                AddMenuItem(menu, "Empty Trash…", EmptyTrash);
+            if (_newFolder.Sensitive)
+                AddMenuItem(menu, "New folder…", CreateFolder);
+        }
+        else if (selected is InventoryItem item && !isLibrary)
+        {
+            var target = ResolveItem(item);
+            if (target is InventoryWearable or InventoryObject or InventoryAttachment)
+            {
+                if (IsWorn(item))
+                {
+                    if (target is not InventoryWearable { AssetType: AssetType.Bodypart })
+                        AddMenuItem(menu, "Detach", () => ChangeOutfit(id, null, true));
+                }
+                else
+                {
+                    AddMenuItem(menu, "Add", () => ChangeOutfit(id, null, false));
+                    if (target is InventoryObject or InventoryAttachment)
+                    {
+                        AddPointMenu(menu, "Add To", id, BodyPoints);
+                        AddPointMenu(menu, "Add To HUD", id, HudPoints);
+                    }
+                }
+            }
+        }
+
+        if (_rename.Sensitive) AddMenuItem(menu, "Rename…", RenameSelected);
+        if (_trash.Sensitive) AddMenuItem(menu, "Move to Trash…", MoveSelectedToTrash);
+        if (menu.Children.Length == 0) { menu.Destroy(); return; }
+        menu.SelectionDone += (_, _) => menu.Destroy();
+        menu.ShowAll();
+        menu.PopupAtPointer(triggerEvent);
+    }
+
+    private static void AddMenuItem(Menu menu, string label, System.Action action)
+    {
+        var item = new MenuItem(label);
+        item.Activated += (_, _) => action();
+        menu.Append(item);
+    }
+
+    private void AddPointMenu(Menu menu, string label, UUID itemId, AttachmentPoint[] points)
+    {
+        var parent = new MenuItem(label);
+        var submenu = new Menu();
+        foreach (var point in points)
+            AddMenuItem(submenu, PointLabel(point), () => ChangeOutfit(itemId, point, false));
+        parent.Submenu = submenu;
+        menu.Append(parent);
+    }
+
+    private static string PointLabel(AttachmentPoint point)
+    {
+        if (point == AttachmentPoint.Root) return "Avatar Center";
+        var name = point.ToString();
+        if (name.StartsWith("HUD", StringComparison.Ordinal)) name = "HUD " + name[3..];
+        return Regex.Replace(name, "(?<=[a-z])(?=[A-Z])", " ");
+    }
+
+    private InventoryItem? ResolveItem(InventoryItem item)
+    {
+        if (!item.IsLink()) return item;
+        return Store != null && Store.TryGetValue(item.AssetUUID, out InventoryBase? target)
+            ? target as InventoryItem : null;
+    }
+
+    private void RefreshWornState()
+    {
+        var worn = new HashSet<UUID>();
+        try { foreach (var item in Client.Appearance.GetWearables()) worn.Add(item.ItemID); }
+        catch { /* Appearance data may still be loading. */ }
+        try { foreach (var id in Client.Appearance.GetAttachmentsByItemId().Keys) worn.Add(id); }
+        catch { /* Attachment data may still be loading. */ }
+
+        // COF links fill gaps when wearable data arrives before its inventory item.
+        var cof = _session.Outfit.COF;
+        if (cof != null && Store != null)
+        {
+            foreach (var link in GetContents(cof.UUID).OfType<InventoryItem>())
+                if (link.IsLink() && Store.TryGetValue(link.AssetUUID, out InventoryBase? target) &&
+                    target is InventoryWearable)
+                    worn.Add(link.AssetUUID);
+        }
+        _wornIds = worn;
+        foreach (var (button, id, display) in _searchButtons)
+            button.Label = display + (IsWornId(id) ? " (worn)" : string.Empty);
+    }
+
+    private bool IsWorn(InventoryItem item) => _wornIds.Contains(item.IsLink() ? item.AssetUUID : item.UUID);
+
+    private bool IsWornId(UUID id) => Store != null &&
+        Store.TryGetValue(id, out InventoryBase? item) &&
+        item is InventoryItem inventoryItem && IsWorn(inventoryItem);
+
     private void UpdateDetails()
     {
         if (_selectedId == UUID.Zero || Store == null || !Store.TryGetValue(_selectedId, out InventoryBase? item))
@@ -362,7 +546,8 @@ internal sealed class InventoryPanel : Box
         var isFolder = item is InventoryFolder;
         var type = isFolder ? "Folder" : (item as InventoryItem)?.InventoryType.ToString() ?? "Item";
         var description = item is InventoryItem inventoryItem ? inventoryItem.Description : string.Empty;
-        _details.Text = $"Name: {item.Name}\n\nType: {type}\n\nDescription: {description}\n\nUUID: {item.UUID}";
+        var wornText = item is InventoryItem wornItem && IsWorn(wornItem) ? "\n\nWorn: Yes" : string.Empty;
+        _details.Text = $"Name: {item.Name}\n\nType: {type}{wornText}\n\nDescription: {description}\n\nUUID: {item.UUID}";
         var isRoot = item.UUID == Store.RootFolder?.UUID || item.UUID == Store.LibraryFolder?.UUID;
         var protectedFolder = item is InventoryFolder folder && folder.PreferredType != FolderType.None;
         var protectedParent = Store.TryGetValue(item.ParentUUID, out InventoryBase? parent) &&
@@ -528,15 +713,26 @@ internal sealed class InventoryPanel : Box
     {
         _searching = false;
         foreach (Widget child in _searchResults.Children) _searchResults.Remove(child);
+        _searchButtons.Clear();
         foreach (var (id, display) in matches)
         {
-            var button = new Button(display) { TooltipText = id.ToString() };
+            var button = new Button(display + (IsWornId(id) ? " (worn)" : string.Empty))
+            {
+                TooltipText = id.ToString()
+            };
             button.Clicked += (_, _) =>
             {
                 _selectedId = id;
                 _selectedIsLibrary = false;
                 UpdateDetails();
             };
+            button.ButtonPressEvent += (_, e) =>
+            {
+                if (e.Event.Button != 3) return;
+                ShowContextMenu(id, false, e.Event);
+                e.RetVal = true;
+            };
+            _searchButtons.Add((button, id, display));
             _searchResults.Add(button);
         }
         _searchResults.ShowAll();
@@ -646,6 +842,96 @@ internal sealed class InventoryPanel : Box
         });
     }
 
+    private bool IsRootTrash(InventoryFolder folder) =>
+        folder.PreferredType == FolderType.Trash &&
+        folder.ParentUUID == Store?.RootFolder?.UUID &&
+        TryGetTrashFolder(out var trashId) && folder.UUID == trashId;
+
+    private void EmptyTrash()
+    {
+        if (Store == null || !Store.TryGetValue(_selectedId, out InventoryBase? selected) ||
+            selected is not InventoryFolder folder || !IsRootTrash(folder)) return;
+
+        var confirm = new MessageDialog((Window)Toplevel, DialogFlags.Modal,
+            MessageType.Warning, ButtonsType.YesNo,
+            "Permanently delete everything in Trash? This cannot be undone.");
+        var accepted = (ResponseType)confirm.Run() == ResponseType.Yes;
+        confirm.Destroy();
+        if (!accepted) return;
+
+        _status.Text = "Emptying Trash…";
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Client.Inventory.EmptyTrashAsync();
+                GtkDispatch.Post(() =>
+                {
+                    if (_disposed) return;
+                    _fetched.Remove(folder.UUID);
+                    _status.Text = "Trash emptied.";
+                    FetchFolder(folder.UUID, false, force: true);
+                    ScheduleRebuild();
+                });
+            }
+            catch (Exception ex)
+            {
+                GtkDispatch.Post(() => { if (!_disposed) _status.Text = $"Could not empty Trash: {ex.Message}"; });
+            }
+        });
+    }
+
+    private void ChangeOutfit(UUID id, AttachmentPoint? point, bool detach)
+    {
+        if (_disposed || !_session.IsConnected || Store == null ||
+            !Store.TryGetValue(id, out InventoryBase? selected) || selected is not InventoryItem item)
+            return;
+        var target = ResolveItem(item);
+        if (target is not (InventoryWearable or InventoryObject or InventoryAttachment)) return;
+        RefreshWornState();
+        if (detach != IsWorn(item)) return;
+
+        _status.Text = detach ? $"Detaching {target.Name}…" : $"Adding {target.Name}…";
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _session.Outfit.GetCurrentOutfitLinksAsync(CancellationToken.None);
+                if (detach)
+                {
+                    if (target is InventoryWearable)
+                        await _session.Outfit.RemoveFromOutfitAsync(target, CancellationToken.None);
+                    else
+                        await _session.Outfit.DetachAsync(target, CancellationToken.None);
+                }
+                else if (point.HasValue)
+                    await _session.Outfit.AttachAsync(target, point.Value, false, CancellationToken.None);
+                else
+                {
+                    var replace = target is InventoryWearable wearable &&
+                                  (wearable.AssetType == AssetType.Bodypart ||
+                                   wearable.WearableType == WearableType.Physics);
+                    await _session.Outfit.AddToOutfitAsync(target, replace, CancellationToken.None);
+                }
+
+                GtkDispatch.Post(() =>
+                {
+                    if (_disposed) return;
+                    _status.Text = detach ? $"Detached {target.Name}." : $"Added {target.Name}.";
+                    ScheduleRebuild();
+                    Timeout.Add(1500, () => { if (!_disposed) ScheduleRebuild(); return false; });
+                });
+            }
+            catch (Exception ex)
+            {
+                GtkDispatch.Post(() =>
+                {
+                    if (!_disposed) _status.Text = $"Could not {(detach ? "detach" : "add")} {target.Name}: {ex.Message}";
+                });
+            }
+        });
+    }
+
     public void Stop()
     {
         if (_disposed) return;
@@ -656,6 +942,8 @@ internal sealed class InventoryPanel : Box
         {
             Client.Inventory.FolderUpdated -= OnFolderUpdated;
             Client.Inventory.ItemReceived -= OnItemReceived;
+            Client.Appearance.AppearanceSet -= OnAppearanceChanged;
+            Client.Appearance.AgentWearablesReply -= OnWearablesChanged;
         }
         if (_subscribedStore != null)
         {

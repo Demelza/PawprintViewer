@@ -23,7 +23,8 @@ attempt; this version does not store credentials.
 - One GTK3 window with a left account rail, top tabs, and a right nearby-avatar
   list for the selected account.
 - Multiple connected accounts in one process. Switching accounts preserves
-  each session's selected tab and chat transcript.
+  each session's selected tab and chat transcript. The account rail shows each
+  avatar's current region and local coordinates.
 - Nearby chat send/receive, and a distance-sorted list of nearby avatars from
   the current simulator's coarse-location updates.
 - Account-specific logout and unread nearby-chat counts for background accounts.
@@ -32,8 +33,13 @@ attempt; this version does not store credentials.
 - **Search all** fetches My Inventory folders on demand, then searches their
   names. Results are capped at 500 displayed matches.
 - Create folders, rename ordinary items or folders, and move them to Trash.
+- Worn wearables and attachments show a `(worn)` tag. Right-click an item to
+  add or detach it, or choose a body or HUD attachment point. The root Trash
+  folder has an **Empty Trash** action with a confirmation prompt.
+- Common system folders stay at the top of My Inventory; the Type column uses
+  20% of the inventory list, and the fixed details pane uses 25% of the view.
 
 The IMs, Group Chats, Attachments, and Friends tabs currently show placeholders.
-Inventory item content editors, previews, wear/rez actions, desktop
+Inventory item content editors, previews, rez actions, desktop
 notifications, and notification sounds are also pending.
 The [GTK3 client plan](../docs/Gtk3ClientPlan.md) tracks the intended scope.
