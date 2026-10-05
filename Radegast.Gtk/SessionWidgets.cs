@@ -10,6 +10,7 @@ internal sealed class SessionWidgets : IDisposable
     private readonly Entry _chatInput;
     private readonly ListBox _nearbyList;
     private readonly InventoryPanel _inventoryPanel;
+    private readonly AttachmentsPanel _attachmentsPanel;
     private readonly Label _locationLabel = new() { Xalign = 0, MarginStart = 8, Ellipsize = Pango.EllipsizeMode.End };
     private bool _disposed;
 
@@ -83,11 +84,13 @@ internal sealed class SessionWidgets : IDisposable
         AddPendingTab("Group Chats");
         _inventoryPanel = new InventoryPanel(session);
         Tabs.AppendPage(_inventoryPanel, new Label("Inventory"));
-        AddPendingTab("Attachments");
+        _attachmentsPanel = new AttachmentsPanel(session);
+        Tabs.AppendPage(_attachmentsPanel, new Label("Attachments"));
         AddPendingTab("Friends");
         Tabs.SwitchPage += (_, _) => GtkDispatch.Post(() =>
         {
             if (Tabs.CurrentPage == 3) _inventoryPanel.StartLoading();
+            if (Tabs.CurrentPage == 4) _attachmentsPanel.StartLoading();
         });
         RefreshNearby();
     }
@@ -165,5 +168,6 @@ internal sealed class SessionWidgets : IDisposable
     {
         _disposed = true;
         _inventoryPanel.Stop();
+        _attachmentsPanel.Stop();
     }
 }

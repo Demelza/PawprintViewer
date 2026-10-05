@@ -38,10 +38,12 @@ attempt; this version does not store credentials.
   Select the root Trash folder to use **Empty Trash**, with a confirmation prompt.
 - Moving an item or folder to Trash uses the inventory move protocol and checks
   the server's inventory response before success is shown.
+- The Attachments tab lists equipped objects and their attachment points, with
+  a Touch button for touchable objects and a disabled button for other objects.
 - Common system folders stay at the top of My Inventory; the Type column uses
   20% of the inventory list, and the fixed details pane uses 25% of the view.
 
-The IMs, Group Chats, Attachments, and Friends tabs currently show placeholders.
+The IMs, Group Chats, and Friends tabs currently show placeholders.
 Inventory item content editors, previews, rez actions, desktop
 notifications, and notification sounds are also pending.
 The [GTK3 client plan](../docs/Gtk3ClientPlan.md) tracks the intended scope.
