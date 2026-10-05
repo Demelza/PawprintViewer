@@ -29,7 +29,7 @@ internal sealed class InstantMessagesPanel : Box
         _session = session;
         var grid = new global::Gtk.Grid { ColumnHomogeneous = true, Hexpand = true, Vexpand = true };
         PackStart(grid, true, true, 0);
-        var rail = new Box(Orientation.Vertical, 6) { BorderWidth = 8 };
+        var rail = new Box(Orientation.Vertical, 6) { BorderWidth = 8, Vexpand = true };
         rail.PackStart(new Label("Conversations") { Xalign = 0, Ellipsize = Pango.EllipsizeMode.End }, false, false, 0);
         var scroll = new ScrolledWindow();
         scroll.SetPolicy(PolicyType.Never, PolicyType.Automatic);
@@ -37,7 +37,7 @@ internal sealed class InstantMessagesPanel : Box
         rail.PackStart(scroll, true, true, 0);
         grid.Attach(rail, 0, 0, 1, 1);
 
-        var content = new Box(Orientation.Horizontal, 0);
+        var content = new Box(Orientation.Horizontal, 0) { Vexpand = true };
         content.PackStart(new Separator(Orientation.Vertical), false, false, 0);
         content.PackStart(_pages, true, true, 0);
         grid.Attach(content, 1, 0, 3, 1);
