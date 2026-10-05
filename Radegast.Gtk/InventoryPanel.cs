@@ -91,6 +91,7 @@ internal sealed class InventoryPanel : Box
     public InventoryPanel(AccountSession session) : base(Orientation.Vertical, 6)
     {
         _session = session;
+        _session.Rlv.Changed += OnRestrictionsChanged;
         BorderWidth = 8;
 
         var toolbar = new Box(Orientation.Horizontal, 6);
@@ -430,18 +431,23 @@ internal sealed class InventoryPanel : Box
         UpdateDetails();
     }
 
-    private static void AddMenuItem(Menu menu, string label, System.Action action)
-    {
-        var item = new MenuItem(label);
-        item.Activated += (_, _) => action();
-        menu.Append(item);
-    }
-
     private Menu CreatePointMenu(AttachmentPoint[] points)
     {
         var menu = new Menu();
+        var entries = new List<(MenuItem Entry, AttachmentPoint Point)>();
         foreach (var point in points)
-            AddMenuItem(menu, PointLabel(point), () => ChangeOutfit(_selectedId, point, false));
+        {
+            var entry = new MenuItem(PointLabel(point));
+            entry.Activated += (_, _) => ChangeOutfit(_selectedId, point, false);
+            entries.Add((entry, point));
+            menu.Append(entry);
+        }
+        menu.Shown += (_, _) =>
+        {
+            var item = Store != null && Store.TryGetValue(_selectedId, out InventoryBase? selected) ? selected as InventoryItem : null;
+            var map = _session.Rlv.Enabled ? _session.Rlv.BuildInventoryMap() : null;
+            foreach (var (entry, point) in entries) entry.Sensitive = item != null && _session.Rlv.CanAdd(item, point, map);
+        };
         menu.ShowAll();
         return menu;
     }
@@ -515,19 +521,21 @@ internal sealed class InventoryPanel : Box
         var protectedParent = Store.TryGetValue(item.ParentUUID, out InventoryBase? parent) &&
                               parent is InventoryFolder parentFolder &&
                               parentFolder.PreferredType is FolderType.CurrentOutfit or FolderType.Inbox;
+        var canModify = isRoot || protectedFolder || protectedParent || _session.Rlv.CanModifyInventory(item);
         _newFolder.Sensitive = isFolder && !_selectedIsLibrary && !protectedParent &&
                                item is InventoryFolder f && f.PreferredType is not (FolderType.Trash or FolderType.CurrentOutfit or FolderType.Inbox);
-        _rename.Sensitive = !_selectedIsLibrary && !isRoot && !protectedFolder && !protectedParent;
+        _rename.Sensitive = canModify && !_selectedIsLibrary && !isRoot && !protectedFolder && !protectedParent;
         _trash.Sensitive = !_selectedIsLibrary && !isRoot && !protectedFolder && !protectedParent &&
                            TryGetTrashFolder(out var trashId) && item.ParentUUID != trashId &&
-                           !IsKnownWorn(item);
+                           !IsKnownWorn(item) && canModify;
         var selectedItem = item as InventoryItem;
         var target = selectedItem != null && !_selectedIsLibrary ? ResolveItem(selectedItem) : null;
         var attachable = target is InventoryWearable or InventoryObject or InventoryAttachment;
         var worn = selectedItem != null && IsWorn(selectedItem);
-        _add.Sensitive = attachable && !worn;
+        _add.Sensitive = attachable && !worn && selectedItem != null && _session.Rlv.CanAdd(selectedItem, null);
         _detach.Sensitive = attachable && worn &&
-                            target is not InventoryWearable { AssetType: AssetType.Bodypart };
+                            target is not InventoryWearable { AssetType: AssetType.Bodypart } &&
+                            selectedItem != null && _session.Rlv.CanDetach(selectedItem);
         _addTo.Sensitive = target is InventoryObject or InventoryAttachment && !worn;
         _addToHud.Sensitive = _addTo.Sensitive;
         _emptyTrash.Sensitive = !_selectedIsLibrary && item is InventoryFolder trashFolder &&
@@ -749,6 +757,7 @@ internal sealed class InventoryPanel : Box
     {
         if (Store == null || _selectedIsLibrary ||
             !Store.TryGetValue(_selectedId, out InventoryBase? selected)) return;
+        if (!_session.Rlv.CanModifyInventory(selected)) { _status.Text = "Changing this item is restricted by RLV."; return; }
         var name = AskForName("Rename inventory item", selected.Name ?? string.Empty);
         if (string.IsNullOrWhiteSpace(name) || name == selected.Name) return;
         var parentId = selected.ParentUUID;
@@ -756,6 +765,7 @@ internal sealed class InventoryPanel : Box
         {
             try
             {
+                if (!_session.Rlv.CanModifyInventory(selected)) throw new InvalidOperationException("Changing this item is restricted by RLV.");
                 if (selected is InventoryFolder)
                     Client.Inventory.UpdateFolderProperties(selected.UUID, parentId, name, FolderType.None);
                 else
@@ -816,6 +826,7 @@ internal sealed class InventoryPanel : Box
 
     private async Task<bool> MoveToTrashOnServerAsync(InventoryBase selected, UUID trashId)
     {
+        if (!_session.Rlv.CanModifyInventory(selected)) throw new InvalidOperationException("Moving this item is restricted by RLV.");
         // Second Life's viewer moves inventory to Trash with these packets.
         // Send them directly so the library cannot route the move through AIS
         // or update its local store before the server has processed it.
@@ -928,13 +939,18 @@ internal sealed class InventoryPanel : Box
         if (target is not (InventoryWearable or InventoryObject or InventoryAttachment)) return;
         RefreshWornState();
         if (detach != IsWorn(item)) return;
+        if (detach ? !_session.Rlv.CanDetach(item) : !_session.Rlv.CanAdd(item, point))
+        {
+            _status.Text = detach ? "Removing this item is restricted by RLV." : "Adding this item is restricted by RLV.";
+            return;
+        }
 
         _status.Text = detach ? $"Detaching {target.Name}…" : $"Adding {target.Name}…";
         _ = Task.Run(async () =>
         {
             try
             {
-                var outfitLinks = await _session.Outfit.GetCurrentOutfitLinksAsync(CancellationToken.None);
+                await _session.Outfit.GetCurrentOutfitLinksAsync(CancellationToken.None);
                 if (item.IsLink())
                 {
                     // A link can be loaded before its target has current metadata.
@@ -944,30 +960,14 @@ internal sealed class InventoryPanel : Box
                     if (freshTarget is InventoryWearable or InventoryObject or InventoryAttachment)
                         target = freshTarget;
                 }
-                var alreadyLinked = outfitLinks.Any(link => link.ResolvedItemID == target.UUID);
                 if (detach)
-                {
-                    if (target is InventoryWearable)
-                        await _session.Outfit.RemoveFromOutfitAsync(target, CancellationToken.None);
-                    else
-                        await _session.Outfit.DetachAsync(target, CancellationToken.None);
-                }
-                else if (target is InventoryObject or InventoryAttachment && alreadyLinked)
-                {
-                    // A COF link may survive a detach while the object is no longer
-                    // physically attached. COF Add skips existing links, so send the
-                    // simulator attach request directly in that case.
-                    if (!Client.Appearance.GetAttachmentsByItemId().ContainsKey(target.UUID))
-                        Client.Appearance.Attach(target, point ?? RememberedPoint(target), false);
-                }
-                else if (point.HasValue)
-                    await _session.Outfit.AttachAsync(target, point.Value, false, CancellationToken.None);
+                    await _session.Rlv.RemoveAsync(target, CancellationToken.None);
                 else
                 {
                     var replace = target is InventoryWearable wearable &&
                                   (wearable.AssetType == AssetType.Bodypart ||
                                    wearable.WearableType == WearableType.Physics);
-                    await _session.Outfit.AddToOutfitAsync(item, replace, CancellationToken.None);
+                    await _session.Rlv.AddAsync(target, point, replace, CancellationToken.None);
                 }
 
                 GtkDispatch.Post(() =>
@@ -988,17 +988,11 @@ internal sealed class InventoryPanel : Box
         });
     }
 
-    private static AttachmentPoint RememberedPoint(InventoryItem item) => item switch
-    {
-        InventoryObject obj => obj.AttachPoint,
-        InventoryAttachment attachment => attachment.AttachmentPoint,
-        _ => AttachmentPoint.Default
-    };
-
     public void Stop()
     {
         if (_disposed) return;
         _disposed = true;
+        _session.Rlv.Changed -= OnRestrictionsChanged;
         _searchCancel?.Cancel();
         _searchCancel?.Dispose();
         if (_active)
@@ -1014,5 +1008,10 @@ internal sealed class InventoryPanel : Box
             _subscribedStore.InventoryObjectRemoved -= OnObjectRemoved;
             _subscribedStore.InventoryObjectUpdated -= OnObjectUpdated;
         }
+    }
+
+    private void OnRestrictionsChanged()
+    {
+        if (!_disposed && _active) UpdateDetails();
     }
 }

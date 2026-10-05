@@ -8,6 +8,7 @@
     <AssemblyName>Radegast.Gtk</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Radegast.Gtk.Tests" />
     <PackageReference Include="GtkSharp" Version="3.24.24.95" />
     <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" SetTargetFramework="TargetFramework=net10.0" />
     <Content Include="..\Radegast\grids.xml" Link="grids.xml" CopyToOutputDirectory="PreserveNewest" />

@@ -1,4 +1,5 @@
 using Gtk;
+using LibreMetaverse;
 
 namespace Radegast.Gtk;
 
@@ -8,6 +9,7 @@ internal sealed class MainWindow : Window
     private readonly Stack _pages = new();
     private readonly Dictionary<AccountSession, SessionWidgets> _sessions = new();
     private readonly Dictionary<AccountSession, HashSet<ScriptDialogWindow>> _scriptDialogs = new();
+    private readonly Dictionary<AccountSession, HashSet<ScriptPermissionWindow>> _permissionDialogs = new();
     private AccountSession? _selected;
     private LoginWindow? _loginWindow;
 
@@ -70,6 +72,7 @@ internal sealed class MainWindow : Window
         session.ChatLine += OnChatLine;
         session.NearbyChanged += OnNearbyChanged;
         session.ScriptDialogReceived += OnScriptDialogReceived;
+        session.PermissionRequested += OnPermissionRequested;
         widgets.AccountRow.ShowAll();
         widgets.Root.ShowAll();
         SelectSession(session);
@@ -93,8 +96,11 @@ internal sealed class MainWindow : Window
         session.ChatLine -= OnChatLine;
         session.NearbyChanged -= OnNearbyChanged;
         session.ScriptDialogReceived -= OnScriptDialogReceived;
+        session.PermissionRequested -= OnPermissionRequested;
         if (_scriptDialogs.Remove(session, out var dialogs))
             foreach (var dialog in dialogs.ToArray()) dialog.CloseMenu();
+        if (_permissionDialogs.Remove(session, out var permissions))
+            foreach (var dialog in permissions.ToArray()) dialog.ClosePrompt();
         widgets.Dispose();
         _accountRows.Remove(widgets.AccountRow);
         _pages.Remove(widgets.Root);
@@ -143,6 +149,18 @@ internal sealed class MainWindow : Window
         var dialog = new ScriptDialogWindow(this, session, menu);
         if (!_scriptDialogs.TryGetValue(session, out var dialogs))
             _scriptDialogs[session] = dialogs = new HashSet<ScriptDialogWindow>();
+        dialogs.Add(dialog);
+        dialog.Destroyed += (_, _) => dialogs.Remove(dialog);
+        dialog.ShowAll();
+        dialog.Present();
+    }
+
+    private void OnPermissionRequested(AccountSession session, ScriptQuestionEventArgs request)
+    {
+        if (!_sessions.ContainsKey(session)) return;
+        var dialog = new ScriptPermissionWindow(this, session, request);
+        if (!_permissionDialogs.TryGetValue(session, out var dialogs))
+            _permissionDialogs[session] = dialogs = new();
         dialogs.Add(dialog);
         dialog.Destroyed += (_, _) => dialogs.Remove(dialog);
         dialog.ShowAll();

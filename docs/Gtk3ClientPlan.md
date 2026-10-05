@@ -57,6 +57,20 @@ applied.
    account rail, then IM/group chat, inventory, attachments, and friends.
 5. Add notification sounds and desktop notifications after the event routing
    works for both selected and background accounts.
+6. Give each account a separate RLV/RLVa engine and command queue. Enforce rules
+   in both GTK controls and outfit operations, including replacement of locked
+   items. Load shared inventory only when queried, and advertise features that
+   are unavailable in this client through the protocol blacklist.
+
+## RLV checkpoint
+
+The RLV tab shows each account's active restrictions and enable switch.
+Inventory, attachment touch, nearby chat, and displayed names/location now use
+that account's permissions. The shared command engine handles inventory queries
+and forced outfit, sit, teleport, rotation, and group operations. Script
+permission requests have separate GTK prompts. See the
+[GTK README](../Radegast.Gtk/README.md#rlv--rlva) for supported features,
+limitations, and the regression-check command.
 
 ## First working checkpoint
 

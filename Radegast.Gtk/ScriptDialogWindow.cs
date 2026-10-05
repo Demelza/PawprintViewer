@@ -8,6 +8,8 @@ internal sealed class ScriptDialogWindow : Window
     private readonly AccountSession _session;
     private readonly ScriptMenu _menu;
     private readonly Label _status = new("") { Xalign = 0, NoShowAll = true };
+    private readonly Label _source;
+    private readonly Label _message;
     private bool _closing;
 
     public ScriptDialogWindow(Window parent, AccountSession session, ScriptMenu menu)
@@ -31,10 +33,11 @@ internal sealed class ScriptDialogWindow : Window
         var objectName = string.IsNullOrWhiteSpace(menu.ObjectName) ? "Scripted object" : menu.ObjectName;
         var source = string.IsNullOrWhiteSpace(menu.OwnerName)
             ? objectName : $"{objectName} · {menu.OwnerName}";
-        content.PackStart(new Label(source)
+        _source = new Label(source)
         {
             Xalign = 0, Selectable = true, LineWrap = true, MaxWidthChars = 52
-        }, false, false, 0);
+        };
+        content.PackStart(_source, false, false, 0);
 
         var message = new Label(menu.Message)
         {
@@ -44,6 +47,7 @@ internal sealed class ScriptDialogWindow : Window
             Selectable = true,
             MaxWidthChars = 52
         };
+        _message = message;
         message.SetSizeRequest(310, -1);
         content.PackStart(message, false, false, 0);
 
@@ -77,6 +81,9 @@ internal sealed class ScriptDialogWindow : Window
         content.PackStart(dismiss, false, false, 0);
         content.PackStart(_status, false, false, 0);
         _status.Hide();
+        session.Rlv.Changed += UpdatePresentation;
+        Destroyed += (_, _) => session.Rlv.Changed -= UpdatePresentation;
+        UpdatePresentation();
     }
 
     private void Reply(int index, string label)
@@ -100,5 +107,16 @@ internal sealed class ScriptDialogWindow : Window
         if (_closing) return;
         _closing = true;
         Dispose();
+    }
+
+    private void UpdatePresentation()
+    {
+        if (_closing) return;
+        var objectName = string.IsNullOrWhiteSpace(_menu.ObjectName) ? "Scripted object" : _menu.ObjectName;
+        var owner = _menu.OwnerName;
+        if (_session.Rlv.Enabled && _menu.OwnerId != _session.Client.Self.AgentID &&
+            !_session.Rlv.Service.Permissions.CanShowNames(_menu.OwnerId.Guid)) owner = "Resident";
+        _source.Text = _session.RedactText(string.IsNullOrWhiteSpace(owner) ? objectName : $"{objectName} · {owner}");
+        _message.Text = _session.RedactText(_menu.Message);
     }
 }

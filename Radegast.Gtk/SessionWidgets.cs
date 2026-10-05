@@ -11,6 +11,8 @@ internal sealed class SessionWidgets : IDisposable
     private readonly ListBox _nearbyList;
     private readonly InventoryPanel _inventoryPanel;
     private readonly AttachmentsPanel _attachmentsPanel;
+    private readonly RlvPanel _rlvPanel;
+    private readonly Stack _inventoryPages = new();
     private readonly Label _locationLabel = new() { Xalign = 0, MarginStart = 8, Ellipsize = Pango.EllipsizeMode.End };
     private bool _disposed;
 
@@ -83,16 +85,21 @@ internal sealed class SessionWidgets : IDisposable
         AddPendingTab("IMs");
         AddPendingTab("Group Chats");
         _inventoryPanel = new InventoryPanel(session);
-        Tabs.AppendPage(_inventoryPanel, new Label("Inventory"));
+        _inventoryPages.AddNamed(_inventoryPanel, "inventory");
+        _inventoryPages.AddNamed(new Label("Inventory is hidden by an RLV restriction."), "restricted");
+        Tabs.AppendPage(_inventoryPages, new Label("Inventory"));
         _attachmentsPanel = new AttachmentsPanel(session);
         Tabs.AppendPage(_attachmentsPanel, new Label("Attachments"));
         AddPendingTab("Friends");
+        _rlvPanel = new RlvPanel(session.Rlv);
+        Tabs.AppendPage(_rlvPanel, new Label("RLV"));
+        session.Rlv.Changed += UpdateRestrictions;
         Tabs.SwitchPage += (_, _) => GtkDispatch.Post(() =>
         {
-            if (Tabs.CurrentPage == 3) _inventoryPanel.StartLoading();
+            if (Tabs.CurrentPage == 3 && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
             if (Tabs.CurrentPage == 4) _attachmentsPanel.StartLoading();
         });
-        RefreshNearby();
+        UpdateRestrictions();
     }
 
     private void AddPendingTab(string title)
@@ -105,8 +112,7 @@ internal sealed class SessionWidgets : IDisposable
     {
         var message = _chatInput.Text.Trim();
         if (message.Length == 0) return;
-        _session.SendNearbyChat(message);
-        _chatInput.Text = string.Empty;
+        if (_session.SendNearbyChat(message)) _chatInput.Text = string.Empty;
     }
 
     public void AppendChat(string line)
@@ -120,7 +126,9 @@ internal sealed class SessionWidgets : IDisposable
         foreach (Widget child in _nearbyList.Children)
             _nearbyList.Remove(child);
 
-        if (_session.Nearby.Count == 0)
+        if (_session.Rlv.Enabled && !_session.Rlv.Service.Permissions.CanShowNearby())
+            _nearbyList.Add(new Label("Nearby avatars hidden by RLV") { Xalign = 0, Margin = 8 });
+        else if (_session.Nearby.Count == 0)
         {
             var empty = new Label("No nearby avatars") { Xalign = 0, Margin = 8 };
             _nearbyList.Add(empty);
@@ -129,11 +137,12 @@ internal sealed class SessionWidgets : IDisposable
         {
             foreach (var person in _session.Nearby)
             {
-                var label = new Label($"{person.Name}  ·  {person.Distance} m")
+                var showName = !_session.Rlv.Enabled || _session.Rlv.Service.Permissions.CanShowNames(person.Id.Guid);
+                var label = new Label($"{(showName ? person.Name : "Resident")}  ·  {person.Distance} m")
                 {
                     Xalign = 0,
                     Margin = 6,
-                    TooltipText = person.Id.ToString()
+                    TooltipText = showName ? person.Id.ToString() : null
                 };
                 _nearbyList.Add(label);
             }
@@ -159,14 +168,34 @@ internal sealed class SessionWidgets : IDisposable
             return;
         }
 
+        if (_session.Rlv.Enabled && !_session.Rlv.Service.Permissions.CanShowLoc())
+        {
+            _locationLabel.Text = "Location hidden by RLV";
+            _locationLabel.TooltipText = null;
+            return;
+        }
         var position = _session.Client.Self.SimPosition;
         _locationLabel.Text = $"{sim.Name}  ({(int)position.X}, {(int)position.Y}, {(int)position.Z})";
         _locationLabel.TooltipText = _locationLabel.Text;
     }
 
+    private void UpdateRestrictions()
+    {
+        if (_disposed) return;
+        _inventoryPages.VisibleChildName = _session.Rlv.Enabled && !_session.Rlv.Service.Permissions.CanShowInv()
+            ? "restricted" : "inventory";
+        UpdateLocation();
+        RefreshNearby();
+        var redacted = _session.RedactText(_chatBuffer.Text);
+        if (redacted != _chatBuffer.Text) _chatBuffer.Text = redacted;
+        if (Tabs.CurrentPage == 3 && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
+    }
+
     public void Dispose()
     {
         _disposed = true;
+        _session.Rlv.Changed -= UpdateRestrictions;
+        _rlvPanel.Stop();
         _inventoryPanel.Stop();
         _attachmentsPanel.Stop();
     }

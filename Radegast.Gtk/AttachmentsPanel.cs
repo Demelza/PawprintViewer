@@ -174,8 +174,9 @@ internal sealed class AttachmentsPanel : Box
             var row = new Box(Orientation.Horizontal, 10) { Margin = 4 };
             var touch = new Button("Touch")
             {
-                Sensitive = entry.Touchable,
-                TooltipText = entry.Touchable ? $"Touch {entry.Name}" :
+                Sensitive = entry.Touchable && _session.Rlv.CanTouch(entry.ObjectId, entry.Point),
+                TooltipText = entry.Touchable ? (_session.Rlv.CanTouch(entry.ObjectId, entry.Point)
+                    ? $"Touch {entry.Name}" : "Touching this attachment is restricted by RLV") :
                     entry.ObjectId == UUID.Zero ? "Waiting for attachment object data" :
                     "This attachment is not touchable"
             };
@@ -230,11 +231,20 @@ internal sealed class AttachmentsPanel : Box
         if (root == null) { ScheduleRefresh(); return; }
         var part = TouchablePart(root, sim.ObjectsPrimitives.Values.Where(prim => prim.ParentID == root.LocalID));
         if (part == null) { ScheduleRefresh(); return; }
+        if (!_session.Rlv.CanTouch(root.ID, root.PrimData.AttachmentPoint) ||
+            !_session.Rlv.CanTouch(part.ID, root.PrimData.AttachmentPoint))
+        {
+            _status.Text = "Touching this attachment is restricted by RLV.";
+            return;
+        }
 
         _ = Task.Run(async () =>
         {
             try
             {
+                if (!_session.Rlv.CanTouch(root.ID, root.PrimData.AttachmentPoint) ||
+                    !_session.Rlv.CanTouch(part.ID, root.PrimData.AttachmentPoint))
+                    throw new InvalidOperationException("Touching this attachment is restricted by RLV.");
                 await Client.Objects.ClickObjectAsync(sim, part.LocalID);
                 GtkDispatch.Post(() => { if (!_disposed) _status.Text = $"Touch sent to {entry.Name}."; });
             }

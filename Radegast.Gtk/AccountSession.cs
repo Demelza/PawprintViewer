@@ -1,12 +1,16 @@
 using LibreMetaverse;
 using LibreMetaverse.Appearance;
 using Radegast;
+using System.Text.RegularExpressions;
 
 namespace Radegast.Gtk;
 
 internal sealed record NearbyResident(UUID Id, string Name, int Distance);
 internal sealed record ScriptMenu(UUID ObjectId, string ObjectName, string OwnerName,
-    string Message, int Channel, IReadOnlyList<string> Buttons);
+    string Message, int Channel, IReadOnlyList<string> Buttons)
+{
+    public UUID OwnerId { get; init; }
+}
 
 /// <summary>A single grid connection. All public events are delivered on the GTK thread.</summary>
 internal sealed class AccountSession : IDisposable
@@ -20,6 +24,7 @@ internal sealed class AccountSession : IDisposable
     public string Id { get; } = Guid.NewGuid().ToString("N");
     public GridClient Client { get; } = new();
     public CurrentOutfitFolder Outfit { get; }
+    public RlvSession Rlv { get; }
     public NetCom Net { get; }
     public string Name { get; private set; } = "Connecting…";
     public string Status { get; private set; } = "Connecting…";
@@ -31,16 +36,22 @@ internal sealed class AccountSession : IDisposable
     public event Action<AccountSession, string>? ChatLine;
     public event Action<AccountSession>? NearbyChanged;
     public event Action<AccountSession, ScriptMenu>? ScriptDialogReceived;
+    public event Action<AccountSession, ScriptQuestionEventArgs>? PermissionRequested;
 
     public AccountSession()
     {
         Outfit = new CurrentOutfitFolder(Client);
+        Rlv = new RlvSession(Client, Outfit, GtkDispatch.Post);
+        Rlv.Message += OnRlvMessage;
+        Rlv.Changed += OnRlvChanged;
         Net = new NetCom(Client);
         Net.ClientLoginStatus += OnLoginProgress;
         Net.ClientDisconnected += OnDisconnected;
         Net.ClientLoggedOut += OnLoggedOut;
         Net.ChatReceived += OnChatReceived;
         Client.Self.ScriptDialog += OnScriptDialog;
+        Client.Self.ScriptQuestion += OnScriptQuestion;
+        Client.Self.IM += OnInstantMessage;
         Client.Grid.CoarseLocationUpdate += OnCoarseLocationUpdate;
         Client.Avatars.UUIDNameReply += OnNameReply;
         Client.Network.RegisterLoginResponseCallback(OnLoginResponse);
@@ -67,15 +78,62 @@ internal sealed class AccountSession : IDisposable
         Net.Login();
     }
 
-    public void SendNearbyChat(string message)
+    public bool SendNearbyChat(string message)
     {
-        if (!IsConnected || string.IsNullOrWhiteSpace(message)) return;
-        Net.ChatOut(message, ChatType.Normal, 0);
+        if (!IsConnected || string.IsNullOrWhiteSpace(message)) return false;
+        var type = ChatType.Normal;
+        if (Rlv.Enabled)
+        {
+            var permissions = Rlv.Service.Permissions;
+            var emote = message.StartsWith("/me ", StringComparison.OrdinalIgnoreCase);
+            if (emote && !permissions.CanEmote()) { OnRlvMessage("[RLV] Emotes are restricted."); return false; }
+            var redirected = emote ? permissions.TryGetRedirEmoteChannels(out var channels) : permissions.TryGetRedirChatChannels(out channels);
+            if (redirected)
+            {
+                var sent = false;
+                foreach (var channel in channels.Where(channel => permissions.CanChat(channel, message)))
+                {
+                    Client.Self.Chat(message, channel, ChatType.Normal);
+                    sent = true;
+                }
+                if (!sent) OnRlvMessage("[RLV] Sending chat on the redirected channels is restricted.");
+                return sent;
+            }
+            if (!permissions.CanChat(0, message)) { OnRlvMessage("[RLV] Sending nearby chat is restricted."); return false; }
+            if (!permissions.CanSendChat())
+            {
+                var period = message.IndexOf('.');
+                if (period >= 0) message = message[..period];
+                var limit = emote ? 30 : 15;
+                if (message.Length > limit) message = message[..limit];
+            }
+            if (!permissions.CanChatNormal())
+            {
+                if (permissions.CanChatWhisper()) type = ChatType.Whisper;
+                else if (permissions.CanChatShout()) type = ChatType.Shout;
+                else { OnRlvMessage("[RLV] All chat volumes are restricted."); return false; }
+            }
+        }
+        Net.ChatOut(message, type, 0);
+        return true;
+    }
+
+    private void OnRlvMessage(string message)
+    {
+        if (!_disposed) ChatLine?.Invoke(this, $"[{DateTime.Now:HH:mm}] {message}");
+    }
+
+    private void OnRlvChanged()
+    {
+        if (_disposed) return;
+        StateChanged?.Invoke(this);
     }
 
     public void ReplyToScriptDialog(ScriptMenu menu, int buttonIndex, string label)
     {
         if (!IsConnected) throw new InvalidOperationException("This account is disconnected.");
+        if (Rlv.Enabled && !Rlv.Service.Permissions.CanChat(menu.Channel, label))
+            throw new InvalidOperationException("Sending replies on this channel is restricted by RLV.");
         Client.Self.ReplyToScriptDialog(menu.Channel, buttonIndex, label, menu.ObjectId);
     }
 
@@ -84,11 +142,38 @@ internal sealed class AccountSession : IDisposable
         var owner = string.Join(" ", new[] { e.FirstName, e.LastName }
             .Where(part => !string.IsNullOrWhiteSpace(part)));
         var menu = new ScriptMenu(e.ObjectID, e.ObjectName, owner, e.Message,
-            e.Channel, e.ButtonLabels.ToArray());
+            e.Channel, e.ButtonLabels.ToArray()) { OwnerId = e.OwnerID };
         GtkDispatch.Post(() =>
         {
             if (!_disposed) ScriptDialogReceived?.Invoke(this, menu);
         });
+    }
+
+    private void OnScriptQuestion(object? sender, ScriptQuestionEventArgs e)
+    {
+        if (_disposed) return;
+        if (Rlv.Enabled && Rlv.Service.Permissions.IsAutoDenyPermissions())
+        {
+            Client.Self.ScriptQuestionReply(e.Simulator, e.ItemID, e.TaskID, ScriptPermission.None);
+            return;
+        }
+        var automatic = ScriptPermission.TriggerAnimation | ScriptPermission.Attach | ScriptPermission.TakeControls;
+        if (Rlv.Enabled && Rlv.Service.Permissions.IsAutoAcceptPermissions() && (e.Questions & ~automatic) == 0)
+        {
+            Client.Self.ScriptQuestionReply(e.Simulator, e.ItemID, e.TaskID, e.Questions);
+            return;
+        }
+        GtkDispatch.Post(() => { if (!_disposed) PermissionRequested?.Invoke(this, e); });
+    }
+
+    private void OnInstantMessage(object? sender, InstantMessageEventArgs e)
+    {
+        if (_disposed || !Rlv.Enabled || e.IM.Dialog != InstantMessageDialog.RequestTeleport) return;
+        var permissions = Rlv.Service.Permissions;
+        if (!permissions.CanTPLure(e.IM.FromAgentID.Guid))
+            Client.Self.TeleportLureRespond(e.IM.FromAgentID, e.IM.IMSessionID, false);
+        else if (permissions.IsAutoAcceptTp(e.IM.FromAgentID.Guid) && permissions.CanUnsit())
+            Client.Self.TeleportLureRespond(e.IM.FromAgentID, e.IM.IMSessionID, true);
     }
 
     private void OnLoginProgress(object? sender, LoginProgressEventArgs e)
@@ -124,6 +209,9 @@ internal sealed class AccountSession : IDisposable
     {
         if (_disposed) return;
         Status = status;
+        var enabled = Rlv.Enabled;
+        Rlv.SetEnabled(false);
+        if (enabled) Rlv.SetEnabled(true);
         _nearby.Clear();
         StateChanged?.Invoke(this);
         NearbyChanged?.Invoke(this);
@@ -133,12 +221,37 @@ internal sealed class AccountSession : IDisposable
     {
         if (e.Message == null || e.Type == ChatType.StartTyping || e.Type == ChatType.StopTyping)
             return;
-        var from = string.IsNullOrWhiteSpace(e.FromName) ? "System" : e.FromName;
-        var line = $"[{DateTime.Now:HH:mm}] {from}: {e.Message}";
+        if (Rlv.TryHandleChat(e)) return;
         GtkDispatch.Post(() =>
         {
-            if (!_disposed) ChatLine?.Invoke(this, line);
+            if (_disposed) return;
+            var permissions = Rlv.Service.Permissions;
+            if (Rlv.Enabled && e.SourceType == ChatSourceType.Agent && e.SourceID != Client.Self.AgentID &&
+                !permissions.CanReceiveChat(e.Message, e.SourceID.Guid)) return;
+            var from = string.IsNullOrWhiteSpace(e.FromName) ? "System" : e.FromName;
+            if (Rlv.Enabled && e.SourceType == ChatSourceType.Agent && e.SourceID != Client.Self.AgentID &&
+                !permissions.CanShowNames(e.SourceID.Guid)) from = "Resident";
+            if (e.SourceType == ChatSourceType.Agent && !string.IsNullOrWhiteSpace(e.FromName))
+                lock (_nameLock) _names[e.SourceID] = e.FromName;
+            ChatLine?.Invoke(this, RedactText($"[{DateTime.Now:HH:mm}] {from}: {e.Message}"));
         });
+    }
+
+    public string RedactText(string text)
+    {
+        if (!Rlv.Enabled) return text;
+        var permissions = Rlv.Service.Permissions;
+        lock (_nameLock)
+            foreach (var (id, name) in _names)
+                if (id != Client.Self.AgentID && !string.IsNullOrWhiteSpace(name) && !permissions.CanShowNames(id.Guid))
+                    text = text.Replace(name, "Resident", StringComparison.OrdinalIgnoreCase);
+        if (!permissions.CanShowLoc())
+        {
+            text = Regex.Replace(text, @"(?:secondlife://|https?://maps\.secondlife\.com/secondlife/)[^\s]+", "[location hidden]", RegexOptions.IgnoreCase);
+            var region = Client.Network.CurrentSim?.Name;
+            if (!string.IsNullOrEmpty(region)) text = text.Replace(region, "[region hidden]", StringComparison.OrdinalIgnoreCase);
+        }
+        return text;
     }
 
     private void OnCoarseLocationUpdate(object? sender, CoarseLocationUpdateEventArgs e)
@@ -210,10 +323,15 @@ internal sealed class AccountSession : IDisposable
         Net.ClientDisconnected -= OnDisconnected;
         Net.ClientLoggedOut -= OnLoggedOut;
         Net.ChatReceived -= OnChatReceived;
+        Rlv.Message -= OnRlvMessage;
+        Rlv.Changed -= OnRlvChanged;
         Client.Self.ScriptDialog -= OnScriptDialog;
+        Client.Self.ScriptQuestion -= OnScriptQuestion;
+        Client.Self.IM -= OnInstantMessage;
         Client.Grid.CoarseLocationUpdate -= OnCoarseLocationUpdate;
         Client.Avatars.UUIDNameReply -= OnNameReply;
         Client.Network.UnregisterLoginResponseCallback(OnLoginResponse);
+        Rlv.Dispose();
         Outfit.Dispose();
         if (Net.IsLoggingIn) Net.CancelLogin();
         if (Net.IsLoggedIn) Net.Logout();
