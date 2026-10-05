@@ -3,12 +3,13 @@ using Gtk;
 namespace Radegast.Gtk;
 
 /// <summary>The widgets belonging to one account, kept alive while another is selected.</summary>
-internal sealed class SessionWidgets
+internal sealed class SessionWidgets : IDisposable
 {
     private readonly AccountSession _session;
     private readonly TextBuffer _chatBuffer;
     private readonly Entry _chatInput;
     private readonly ListBox _nearbyList;
+    private readonly InventoryPanel _inventoryPanel;
 
     public Box Root { get; }
     public Box AccountRow { get; }
@@ -68,9 +69,14 @@ internal sealed class SessionWidgets
 
         AddPendingTab("IMs");
         AddPendingTab("Group Chats");
-        AddPendingTab("Inventory");
+        _inventoryPanel = new InventoryPanel(session);
+        Tabs.AppendPage(_inventoryPanel, new Label("Inventory"));
         AddPendingTab("Attachments");
         AddPendingTab("Friends");
+        Tabs.SwitchPage += (_, _) => GtkDispatch.Post(() =>
+        {
+            if (Tabs.CurrentPage == 3) _inventoryPanel.StartLoading();
+        });
         RefreshNearby();
     }
 
@@ -126,4 +132,6 @@ internal sealed class SessionWidgets
         AccountButton.Label = $"{(selected ? "› " : "")}{_session.Name}{unread}";
         AccountButton.TooltipText = _session.Status;
     }
+
+    public void Dispose() => _inventoryPanel.Stop();
 }

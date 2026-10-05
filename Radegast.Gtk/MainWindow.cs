@@ -90,6 +90,7 @@ internal sealed class MainWindow : Window
         session.StateChanged -= OnStateChanged;
         session.ChatLine -= OnChatLine;
         session.NearbyChanged -= OnNearbyChanged;
+        widgets.Dispose();
         _accountRows.Remove(widgets.AccountRow);
         _pages.Remove(widgets.Root);
         session.Dispose();

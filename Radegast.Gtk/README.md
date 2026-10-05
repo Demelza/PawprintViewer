@@ -27,7 +27,13 @@ attempt; this version does not store credentials.
 - Nearby chat send/receive, and a distance-sorted list of nearby avatars from
   the current simulator's coarse-location updates.
 - Account-specific logout and unread nearby-chat counts for background accounts.
+- Inventory folder browsing, item details, and per-folder refresh. Folders load
+  when opened. The Library is shown when the grid provides it.
+- **Search all** fetches My Inventory folders on demand, then searches their
+  names. Results are capped at 500 displayed matches.
+- Create folders, rename ordinary items or folders, and move them to Trash.
 
-The IMs, Group Chats, Inventory, Attachments, and Friends tabs currently show
-placeholders. Desktop notifications and notification sounds are also pending.
+The IMs, Group Chats, Attachments, and Friends tabs currently show placeholders.
+Inventory item content editors, previews, wear/rez actions, desktop
+notifications, and notification sounds are also pending.
 The [GTK3 client plan](../docs/Gtk3ClientPlan.md) tracks the intended scope.
