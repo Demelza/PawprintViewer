@@ -10,6 +10,166 @@ using Radegast.Gtk;
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Standing stops furniture linkset animations and preserves attachment animations", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var packets = f.CapturePackets();
+        var furniture = f.Prim(200);
+        var seat = f.Prim(201, furniture.LocalID);
+        var script = f.Prim(202, furniture.LocalID);
+        var rootAnimation = UUID.Random();
+        var childAnimation = UUID.Random();
+        var attachmentAnimation = UUID.Random();
+        f.ChangeSeat(seat.LocalID);
+        f.Animations((rootAnimation, 1, furniture.ID), (childAnimation, 2, script.ID),
+            (attachmentAnimation, 3, f.Attachment.ID), (Animations.SIT, 4, UUID.Zero));
+        f.ChangeSeat(0);
+        var stop = packets().OfType<AgentAnimationPacket>().Single();
+        Check(stop.Header.Reliable && stop.AgentData.AgentID == f.Owner, "Cleanup was not sent reliably for the seated account");
+        Check(stop.AnimationList.All(animation => !animation.StartAnim) &&
+            stop.AnimationList.Select(animation => animation.AnimID).ToHashSet().SetEquals(new[] { rootAnimation, childAnimation }),
+            "Cleanup missed a furniture animation or stopped an attachment/default animation");
+        f.ChangeSeat(0);
+        Check(!packets().OfType<AgentAnimationPacket>().Any(), "An unchanged seat caused another cleanup");
+        return Task.CompletedTask;
+    }),
+    ("A direct furniture switch stops only the previous furniture's pose", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var packets = f.CapturePackets();
+        var oldSeat = f.Prim(200);
+        var newSeat = f.Prim(300);
+        var oldPose = UUID.Random();
+        var newPose = UUID.Random();
+        f.ChangeSeat(oldSeat.LocalID);
+        // New animation updates can arrive before the avatar's seat update.
+        f.Animations((oldPose, 1, oldSeat.ID), (newPose, 2, newSeat.ID));
+        f.ChangeSeat(newSeat.LocalID);
+        var stop = packets().OfType<AgentAnimationPacket>().Single();
+        Check(stop.AnimationList.Length == 1 && stop.AnimationList[0].AnimID == oldPose && !stop.AnimationList[0].StartAnim,
+            "The old pose was not stopped independently of the new furniture");
+        f.ChangeSeat(0);
+        Check(packets().OfType<AgentAnimationPacket>().Single().AnimationList.Single().AnimID == newPose,
+            "The new furniture's pose was not cleaned when subsequently standing");
+        return Task.CompletedTask;
+    }),
+    ("A new seat can reuse an animation without a stale stop cancelling it", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var packets = f.CapturePackets();
+        var oldSeat = f.Prim(200);
+        var newSeat = f.Prim(300);
+        var pose = UUID.Random();
+        f.ChangeSeat(oldSeat.LocalID);
+        f.Animations((pose, 1, oldSeat.ID));
+        f.Animations((pose, 2, newSeat.ID));
+        f.ChangeSeat(newSeat.LocalID);
+        Check(!packets().OfType<AgentAnimationPacket>().Any(), "A restarted animation from the new seat was stopped");
+        f.ChangeSeat(0);
+        Check(packets().OfType<AgentAnimationPacket>().Single().AnimationList.Single().AnimID == pose,
+            "The animation's new source was not retained");
+        return Task.CompletedTask;
+    }),
+    ("Animation snapshots retain omitted sources only for the same running instance", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var packets = f.CapturePackets();
+        var seat = f.Prim(200);
+        var pose = UUID.Random();
+        f.ChangeSeat(seat.LocalID);
+        f.Animations((pose, 1, seat.ID));
+        f.Animations((pose, 1, UUID.Zero));
+        f.ChangeSeat(0);
+        Check(packets().OfType<AgentAnimationPacket>().Single().AnimationList.Single().AnimID == pose,
+            "An omitted source lost the previous furniture association");
+        f.ChangeSeat(seat.LocalID);
+        f.Animations((pose, 2, seat.ID));
+        f.Animations((pose, 3, UUID.Zero));
+        f.ChangeSeat(0);
+        Check(!packets().OfType<AgentAnimationPacket>().Any(), "A restarted animation inherited a stale furniture source");
+        f.ChangeSeat(seat.LocalID);
+        f.Animations((pose, 4, seat.ID));
+        f.Animations();
+        f.ChangeSeat(0);
+        Check(!packets().OfType<AgentAnimationPacket>().Any(), "An animation already stopped by the script was stopped again");
+        return Task.CompletedTask;
+    }),
+    ("Moving between linked seats preserves the furniture's animation", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var packets = f.CapturePackets();
+        var furniture = f.Prim(200);
+        var oldSeat = f.Prim(201, furniture.LocalID);
+        var newSeat = f.Prim(202, furniture.LocalID);
+        var pose = UUID.Random();
+        f.ChangeSeat(oldSeat.LocalID);
+        f.Animations((pose, 1, furniture.ID));
+        f.ChangeSeat(newSeat.LocalID);
+        Check(!packets().OfType<AgentAnimationPacket>().Any(), "A move within the same furniture stopped its pose");
+        f.ChangeSeat(0);
+        Check(packets().OfType<AgentAnimationPacket>().Single().AnimationList.Single().AnimID == pose,
+            "Leaving the linked furniture did not clean its pose");
+        return Task.CompletedTask;
+    }),
+    ("Standing can clean a seat removed from the object cache", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var packets = f.CapturePackets();
+        var furniture = f.Prim(200);
+        var seat = f.Prim(201, furniture.LocalID);
+        var pose = UUID.Random();
+        f.ChangeSeat(seat.LocalID);
+        f.Animations((pose, 1, furniture.ID));
+        f.Simulator.ObjectsPrimitives.TryRemove(seat.LocalID, out _);
+        f.Simulator.ObjectsPrimitives.TryRemove(furniture.LocalID, out _);
+        f.ChangeSeat(0);
+        Check(packets().OfType<AgentAnimationPacket>().Single().AnimationList.Single().AnimID == pose,
+            "Removing the old seat from the cache lost its animation sources");
+        return Task.CompletedTask;
+    }),
+    ("Seat cleanup ignores other avatars and regions and remains active with RLV disabled", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var packets = f.CapturePackets();
+        var seat = f.Prim(200);
+        var pose = UUID.Random();
+        f.ChangeSeat(seat.LocalID);
+        f.Animations((pose, 1, seat.ID));
+        f.ReceiveAnimations(UUID.Random(), f.Simulator, (pose, 2, f.Attachment.ID));
+        f.ChangeSeat(0, avatarId: UUID.Random(), oldSeat: seat.LocalID);
+        using var neighbor = new Simulator(f.Client, new IPEndPoint(IPAddress.Loopback, 13001), 2);
+        f.ReceiveAnimations(f.Owner, neighbor, (pose, 3, f.Attachment.ID));
+        f.ChangeSeat(0, oldSeat: seat.LocalID, simulator: neighbor);
+        Check(!packets().OfType<AgentAnimationPacket>().Any(), "Another avatar's stand cleaned this account's animation");
+        f.Rlv.SetEnabled(false);
+        f.ChangeSeat(0);
+        Check(packets().OfType<AgentAnimationPacket>().Single().AnimationList.Single().AnimID == pose,
+            "Disabling RLV disabled normal furniture cleanup or another avatar replaced the animation source");
+        return Task.CompletedTask;
+    }),
+    ("RLV stand locks do not trigger cleanup before a real stand", async () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var packets = f.CapturePackets();
+        var seat = f.Prim(200);
+        var pose = UUID.Random();
+        f.ChangeSeat(seat.LocalID);
+        f.Animations((pose, 1, seat.ID));
+        await f.Command("@unsit=n,unsit=force");
+        Check(!packets().OfType<AgentAnimationPacket>().Any(), "A blocked stand stopped the furniture animation");
+        await f.Command("@unsit=y,unsit=force");
+        f.ChangeSeat(0);
+        Check(packets().OfType<AgentAnimationPacket>().Single().AnimationList.Single().AnimID == pose,
+            "An allowed RLV stand did not clean the furniture animation");
+    }),
     ("Typed chat channel prefixes route only the payload to the chosen channel", () =>
     {
         using var session = new AccountSession(action => action());
@@ -436,6 +596,37 @@ sealed class Fixture : IDisposable
     }
 
     public Task Command(string text, Guid? issuer = null) => Rlv.ProcessCommandAsync(text, issuer ?? _issuer, "Test object");
+
+    public Primitive Prim(uint localId, uint parent = 0)
+    {
+        var primitive = new Primitive { ID = UUID.Random(), LocalID = localId, ParentID = parent };
+        Simulator.ObjectsPrimitives[localId] = primitive;
+        return primitive;
+    }
+
+    public void ChangeSeat(uint seat, UUID? avatarId = null, uint? oldSeat = null, Simulator? simulator = null)
+    {
+        var id = avatarId ?? Owner;
+        var avatar = new Avatar { ID = id, LocalID = id == Owner ? Client.Self.LocalID : 999 };
+        typeof(ObjectManager).GetMethod("SetAvatarSittingOn", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(Client.Objects, new object[] { simulator ?? Simulator, avatar, seat, oldSeat ?? Client.Self.SittingOn });
+    }
+
+    public void Animations(params (UUID Id, int Sequence, UUID Source)[] animations) => ReceiveAnimations(Owner, Simulator, animations);
+
+    public void ReceiveAnimations(UUID avatar, Simulator simulator, params (UUID Id, int Sequence, UUID Source)[] animations)
+    {
+        var packet = new AvatarAnimationPacket();
+        packet.Sender.ID = avatar;
+        packet.AnimationList = animations.Select(animation => new AvatarAnimationPacket.AnimationListBlock
+            { AnimID = animation.Id, AnimSequenceID = animation.Sequence }).ToArray();
+        packet.AnimationSourceList = animations.Select(animation => new AvatarAnimationPacket.AnimationSourceListBlock
+            { ObjectID = animation.Source }).ToArray();
+        var events = (PacketEventDictionary)typeof(NetworkManager).GetField("PacketEvents", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(Client.Network)!;
+        events.InvokeRaiseEvent(packet.Type, packet, simulator);
+    }
+
     public Func<List<Packet>> CapturePackets()
     {
         var outbox = Channel.CreateUnbounded<NetworkManager.OutgoingPacket>();

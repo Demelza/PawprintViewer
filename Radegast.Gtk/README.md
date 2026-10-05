@@ -71,6 +71,13 @@ locks, forced wear/remove actions, `#RLV` inventory and worn-state queries,
 chat and emote restrictions/redirection, touch restrictions, hidden inventory,
 names and location, forced sit/stand/rotation/teleport, active group changes,
 teleport offer restrictions/automatic acceptance, and script permission rules.
+
+When the avatar stands or moves directly to different furniture, the client
+stops animations started by the previous furniture and its linked prims.
+Animations from attachments and the new furniture are preserved. This cleanup
+also works with RLV disabled and does not interrupt moves between seats in the
+same furniture linkset.
+
 Shared inventory loads on demand, including link targets, without opening the
 Inventory tab. The shared root is the folder named exactly `#RLV` directly under
 **My Inventory**. Paths in commands are relative to that folder: for example,
@@ -108,6 +115,9 @@ dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrame
 For a live check, use an RLV attachment to test detection, lock/unlock and
 detachment through both the actual item and an inventory link. Then check its
 shared inventory menu and test two accounts with different restrictions.
+For furniture, use two seats with different animations and test both an RLV
+furniture switch and standing. Check from another viewer that the old pose
+stops, the new pose plays, and attachment/AO animations remain active.
 
 The IMs, Group Chats, and Friends tabs currently show placeholders.
 Inventory item content editors, previews, rez actions, desktop

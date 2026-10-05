@@ -20,6 +20,7 @@ internal sealed class AccountSession : IDisposable
     private readonly Dictionary<UUID, string> _names = new();
     private readonly HashSet<UUID> _requestedNames = new();
     private readonly object _nameLock = new();
+    private readonly SeatAnimationController _seatAnimations;
     private List<NearbyResident> _nearby = new();
     private bool _disposed;
 
@@ -42,6 +43,7 @@ internal sealed class AccountSession : IDisposable
 
     public AccountSession(Action<Action>? post = null)
     {
+        _seatAnimations = new SeatAnimationController(Client);
         Outfit = new CurrentOutfitFolder(Client);
         Rlv = new RlvSession(Client, Outfit, post ?? GtkDispatch.Post);
         Rlv.Message += OnRlvMessage;
@@ -356,6 +358,7 @@ internal sealed class AccountSession : IDisposable
         Client.Avatars.UUIDNameReply -= OnNameReply;
         Client.Network.UnregisterLoginResponseCallback(OnLoginResponse);
         Rlv.Dispose();
+        _seatAnimations.Dispose();
         Outfit.Dispose();
         if (Net.IsLoggingIn) Net.CancelLogin();
         if (Net.IsLoggedIn) Net.Logout();
