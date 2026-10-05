@@ -65,6 +65,11 @@ internal sealed class InventoryPanel : Box
     private readonly Button _newFolder = new("New folder");
     private readonly Button _rename = new("Rename");
     private readonly Button _trash = new("Move to Trash");
+    private readonly Button _add = new("Add");
+    private readonly Button _detach = new("Detach");
+    private readonly MenuButton _addTo = new() { Label = "Add To" };
+    private readonly MenuButton _addToHud = new() { Label = "Add To HUD" };
+    private readonly Button _emptyTrash = new("Empty Trash");
     private readonly HashSet<UUID> _expanded = new();
     private readonly HashSet<UUID> _fetched = new();
     private readonly HashSet<UUID> _fetching = new();
@@ -117,7 +122,6 @@ internal sealed class InventoryPanel : Box
         _tree.RowExpanded += OnRowExpanded;
         _tree.RowCollapsed += OnRowCollapsed;
         _tree.Selection.Changed += (_, _) => OnTreeSelectionChanged();
-        _tree.ButtonPressEvent += OnTreeButtonPress;
         var treeScroll = new ScrolledWindow();
         treeScroll.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
         treeScroll.Add(_tree);
@@ -144,9 +148,19 @@ internal sealed class InventoryPanel : Box
         _newFolder.Clicked += (_, _) => CreateFolder();
         _rename.Clicked += (_, _) => RenameSelected();
         _trash.Clicked += (_, _) => MoveSelectedToTrash();
+        _add.Clicked += (_, _) => ChangeOutfit(_selectedId, null, false);
+        _detach.Clicked += (_, _) => ChangeOutfit(_selectedId, null, true);
+        _emptyTrash.Clicked += (_, _) => EmptyTrash();
+        _addTo.Popup = CreatePointMenu(BodyPoints);
+        _addToHud.Popup = CreatePointMenu(HudPoints);
+        detailPane.PackStart(_add, false, false, 0);
+        detailPane.PackStart(_detach, false, false, 0);
+        detailPane.PackStart(_addTo, false, false, 0);
+        detailPane.PackStart(_addToHud, false, false, 0);
         detailPane.PackStart(_newFolder, false, false, 0);
         detailPane.PackStart(_rename, false, false, 0);
         detailPane.PackStart(_trash, false, false, 0);
+        detailPane.PackStart(_emptyTrash, false, false, 0);
         split.PackStart(detailPane, false, false, 0);
 
         PackEnd(_status, false, false, 0);
@@ -411,65 +425,8 @@ internal sealed class InventoryPanel : Box
         if (_building || !_tree.Selection.GetSelected(out var model, out var row)) return;
         _selectedId = RowId(row);
         _selectedIsLibrary = RowIsLibrary(row);
-        UpdateDetails();
-    }
-
-    private void OnTreeButtonPress(object? sender, ButtonPressEventArgs e)
-    {
-        if (e.Event.Button != 3 ||
-            !_tree.GetPathAtPos((int)e.Event.X, (int)e.Event.Y, out var path, out _, out _, out _)) return;
-        _tree.Selection.SelectPath(path);
-        if (!_treeModel.GetIter(out var row, path)) return;
-        var id = RowId(row);
-        if (id == UUID.Zero) return;
-        ShowContextMenu(id, RowIsLibrary(row), e.Event);
-        e.RetVal = true;
-    }
-
-    private void ShowContextMenu(UUID id, bool isLibrary, Gdk.Event triggerEvent)
-    {
-        if (Store == null || !Store.TryGetValue(id, out InventoryBase? selected)) return;
-        _selectedId = id;
-        _selectedIsLibrary = isLibrary;
         RefreshWornState();
         UpdateDetails();
-
-        var menu = new Menu();
-        if (selected is InventoryFolder folder)
-        {
-            if (IsRootTrash(folder) && !isLibrary)
-                AddMenuItem(menu, "Empty Trash…", EmptyTrash);
-            if (_newFolder.Sensitive)
-                AddMenuItem(menu, "New folder…", CreateFolder);
-        }
-        else if (selected is InventoryItem item && !isLibrary)
-        {
-            var target = ResolveItem(item);
-            if (target is InventoryWearable or InventoryObject or InventoryAttachment)
-            {
-                if (IsWorn(item))
-                {
-                    if (target is not InventoryWearable { AssetType: AssetType.Bodypart })
-                        AddMenuItem(menu, "Detach", () => ChangeOutfit(id, null, true));
-                }
-                else
-                {
-                    AddMenuItem(menu, "Add", () => ChangeOutfit(id, null, false));
-                    if (target is InventoryObject or InventoryAttachment)
-                    {
-                        AddPointMenu(menu, "Add To", id, BodyPoints);
-                        AddPointMenu(menu, "Add To HUD", id, HudPoints);
-                    }
-                }
-            }
-        }
-
-        if (_rename.Sensitive) AddMenuItem(menu, "Rename…", RenameSelected);
-        if (_trash.Sensitive) AddMenuItem(menu, "Move to Trash…", MoveSelectedToTrash);
-        if (menu.Children.Length == 0) { menu.Destroy(); return; }
-        menu.SelectionDone += (_, _) => menu.Destroy();
-        menu.ShowAll();
-        menu.PopupAtPointer(triggerEvent);
     }
 
     private static void AddMenuItem(Menu menu, string label, System.Action action)
@@ -479,14 +436,13 @@ internal sealed class InventoryPanel : Box
         menu.Append(item);
     }
 
-    private void AddPointMenu(Menu menu, string label, UUID itemId, AttachmentPoint[] points)
+    private Menu CreatePointMenu(AttachmentPoint[] points)
     {
-        var parent = new MenuItem(label);
-        var submenu = new Menu();
+        var menu = new Menu();
         foreach (var point in points)
-            AddMenuItem(submenu, PointLabel(point), () => ChangeOutfit(itemId, point, false));
-        parent.Submenu = submenu;
-        menu.Append(parent);
+            AddMenuItem(menu, PointLabel(point), () => ChangeOutfit(_selectedId, point, false));
+        menu.ShowAll();
+        return menu;
     }
 
     private static string PointLabel(AttachmentPoint point)
@@ -540,6 +496,11 @@ internal sealed class InventoryPanel : Box
             _newFolder.Sensitive = false;
             _rename.Sensitive = false;
             _trash.Sensitive = false;
+            _add.Sensitive = false;
+            _detach.Sensitive = false;
+            _addTo.Sensitive = false;
+            _addToHud.Sensitive = false;
+            _emptyTrash.Sensitive = false;
             return;
         }
 
@@ -559,6 +520,17 @@ internal sealed class InventoryPanel : Box
         _trash.Sensitive = !_selectedIsLibrary && !isRoot && !protectedFolder && !protectedParent &&
                            TryGetTrashFolder(out var trashId) && item.ParentUUID != trashId &&
                            !IsKnownWorn(item);
+        var selectedItem = item as InventoryItem;
+        var target = selectedItem != null && !_selectedIsLibrary ? ResolveItem(selectedItem) : null;
+        var attachable = target is InventoryWearable or InventoryObject or InventoryAttachment;
+        var worn = selectedItem != null && IsWorn(selectedItem);
+        _add.Sensitive = attachable && !worn;
+        _detach.Sensitive = attachable && worn &&
+                            target is not InventoryWearable { AssetType: AssetType.Bodypart };
+        _addTo.Sensitive = target is InventoryObject or InventoryAttachment && !worn;
+        _addToHud.Sensitive = _addTo.Sensitive;
+        _emptyTrash.Sensitive = !_selectedIsLibrary && item is InventoryFolder trashFolder &&
+                                IsRootTrash(trashFolder);
     }
 
     private bool TryGetTrashFolder(out UUID trashId)
@@ -724,13 +696,8 @@ internal sealed class InventoryPanel : Box
             {
                 _selectedId = id;
                 _selectedIsLibrary = false;
+                RefreshWornState();
                 UpdateDetails();
-            };
-            button.ButtonPressEvent += (_, e) =>
-            {
-                if (e.Event.Button != 3) return;
-                ShowContextMenu(id, false, e.Event);
-                e.RetVal = true;
             };
             _searchButtons.Add((button, id, display));
             _searchResults.Add(button);
@@ -818,28 +785,73 @@ internal sealed class InventoryPanel : Box
         if (!accepted) return;
 
         var oldParent = selected.ParentUUID;
+        _status.Text = $"Moving {selected.Name} to Trash…";
         _ = Task.Run(async () =>
         {
             try
             {
-                if (selected is InventoryFolder)
-                    await Client.Inventory.MoveFolderAsync(selected.UUID, trashId);
-                else
-                    await Client.Inventory.MoveItemAsync(selected.UUID, trashId, selected.Name);
+                var confirmed = await MoveToTrashOnServerAsync(selected, trashId);
+                if (!confirmed)
+                    throw new InvalidOperationException("The server did not confirm the move.");
+
+                UpdateLocalParent(selected.UUID, trashId);
                 GtkDispatch.Post(() =>
                 {
                     if (_disposed) return;
                     _selectedId = UUID.Zero;
-                    _status.Text = $"Moved {selected.Name} to Trash.";
                     FetchFolder(oldParent, false, force: true);
+                    if (_expanded.Contains(trashId)) FetchFolder(trashId, false, force: true);
+                    _status.Text = $"Moved {selected.Name} to Trash.";
                     ScheduleRebuild();
                 });
             }
             catch (Exception ex)
             {
+                UpdateLocalParent(selected.UUID, oldParent);
                 GtkDispatch.Post(() => { if (!_disposed) _status.Text = $"Move failed: {ex.Message}"; });
             }
         });
+    }
+
+    private async Task<bool> MoveToTrashOnServerAsync(InventoryBase selected, UUID trashId)
+    {
+        if (Client.AisClient.IsAvailable)
+            return selected is InventoryFolder
+                ? await Client.AisClient.MoveCategoryAsync(selected.UUID, trashId)
+                : await Client.AisClient.MoveItemAsync(selected.UUID, trashId);
+
+        // UDP has no move acknowledgement. Use the move-only overload, then
+        // independently fetch the item or Trash contents to confirm persistence.
+        if (selected is InventoryFolder)
+            await Client.Inventory.MoveFolderAsync(selected.UUID, trashId);
+        else
+            await Client.Inventory.MoveItemAsync(selected.UUID, trashId);
+
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            await Task.Delay(700);
+            if (selected is InventoryItem item)
+            {
+                var fetched = await Client.Inventory.FetchItemHttpAsync(item.UUID, Client.Self.AgentID);
+                if (fetched?.ParentUUID == trashId) return true;
+            }
+            else
+            {
+                var contents = await Client.Inventory.RequestFolderContentsAsync(
+                    trashId, Client.Self.AgentID, true, false, InventorySortOrder.ByName);
+                if (contents.Any(child => child.UUID == selected.UUID)) return true;
+            }
+        }
+        return false;
+    }
+
+    private void UpdateLocalParent(UUID id, UUID parentId)
+    {
+        var inventory = Store;
+        if (inventory == null || !inventory.TryGetValue(id, out InventoryBase? current) ||
+            current.ParentUUID == parentId) return;
+        current.ParentUUID = parentId;
+        inventory.UpdateNodeFor(current);
     }
 
     private bool IsRootTrash(InventoryFolder folder) =>
@@ -896,13 +908,31 @@ internal sealed class InventoryPanel : Box
         {
             try
             {
-                await _session.Outfit.GetCurrentOutfitLinksAsync(CancellationToken.None);
+                var outfitLinks = await _session.Outfit.GetCurrentOutfitLinksAsync(CancellationToken.None);
+                if (item.IsLink())
+                {
+                    // A link can be loaded before its target has current metadata.
+                    // Fetch the target, then let COF resolve the original link.
+                    var freshTarget = await Client.Inventory.FetchItemHttpAsync(
+                        item.AssetUUID, Client.Self.AgentID);
+                    if (freshTarget is InventoryWearable or InventoryObject or InventoryAttachment)
+                        target = freshTarget;
+                }
+                var alreadyLinked = outfitLinks.Any(link => link.ResolvedItemID == target.UUID);
                 if (detach)
                 {
                     if (target is InventoryWearable)
                         await _session.Outfit.RemoveFromOutfitAsync(target, CancellationToken.None);
                     else
                         await _session.Outfit.DetachAsync(target, CancellationToken.None);
+                }
+                else if (target is InventoryObject or InventoryAttachment && alreadyLinked)
+                {
+                    // A COF link may survive a detach while the object is no longer
+                    // physically attached. COF Add skips existing links, so send the
+                    // simulator attach request directly in that case.
+                    if (!Client.Appearance.GetAttachmentsByItemId().ContainsKey(target.UUID))
+                        Client.Appearance.Attach(target, point ?? RememberedPoint(target), false);
                 }
                 else if (point.HasValue)
                     await _session.Outfit.AttachAsync(target, point.Value, false, CancellationToken.None);
@@ -911,13 +941,13 @@ internal sealed class InventoryPanel : Box
                     var replace = target is InventoryWearable wearable &&
                                   (wearable.AssetType == AssetType.Bodypart ||
                                    wearable.WearableType == WearableType.Physics);
-                    await _session.Outfit.AddToOutfitAsync(target, replace, CancellationToken.None);
+                    await _session.Outfit.AddToOutfitAsync(item, replace, CancellationToken.None);
                 }
 
                 GtkDispatch.Post(() =>
                 {
                     if (_disposed) return;
-                    _status.Text = detach ? $"Detached {target.Name}." : $"Added {target.Name}.";
+                    _status.Text = detach ? $"Detached {target.Name}." : $"Add requested for {target.Name}.";
                     ScheduleRebuild();
                     Timeout.Add(1500, () => { if (!_disposed) ScheduleRebuild(); return false; });
                 });
@@ -931,6 +961,13 @@ internal sealed class InventoryPanel : Box
             }
         });
     }
+
+    private static AttachmentPoint RememberedPoint(InventoryItem item) => item switch
+    {
+        InventoryObject obj => obj.AttachPoint,
+        InventoryAttachment attachment => attachment.AttachmentPoint,
+        _ => AttachmentPoint.Default
+    };
 
     public void Stop()
     {

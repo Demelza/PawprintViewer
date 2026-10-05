@@ -33,9 +33,11 @@ attempt; this version does not store credentials.
 - **Search all** fetches My Inventory folders on demand, then searches their
   names. Results are capped at 500 displayed matches.
 - Create folders, rename ordinary items or folders, and move them to Trash.
-- Worn wearables and attachments show a `(worn)` tag. Right-click an item to
-  add or detach it, or choose a body or HUD attachment point. The root Trash
-  folder has an **Empty Trash** action with a confirmation prompt.
+- Worn wearables and attachments show a `(worn)` tag. Select an item to use
+  **Add**, **Detach**, **Add To**, or **Add To HUD** at the bottom of Item details.
+  Select the root Trash folder to use **Empty Trash**, with a confirmation prompt.
+- Moving an item to Trash waits for an acknowledged server move when supported;
+  older grids are checked with a fresh inventory fetch before success is shown.
 - Common system folders stay at the top of My Inventory; the Type column uses
   20% of the inventory list, and the fixed details pane uses 25% of the view.
 
