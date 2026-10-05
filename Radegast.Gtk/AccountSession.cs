@@ -1,6 +1,7 @@
 using LibreMetaverse;
 using LibreMetaverse.Appearance;
 using Radegast;
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Radegast.Gtk;
@@ -15,6 +16,7 @@ internal sealed record ScriptMenu(UUID ObjectId, string ObjectName, string Owner
 /// <summary>A single grid connection. All public events are delivered on the GTK thread.</summary>
 internal sealed class AccountSession : IDisposable
 {
+    private static readonly Regex ChatChannelPrefix = new(@"^/(?<channel>[+-]?[0-9]+)\s*(?<message>[\s\S]*)$", RegexOptions.CultureInvariant);
     private readonly Dictionary<UUID, string> _names = new();
     private readonly HashSet<UUID> _requestedNames = new();
     private readonly object _nameLock = new();
@@ -38,10 +40,10 @@ internal sealed class AccountSession : IDisposable
     public event Action<AccountSession, ScriptMenu>? ScriptDialogReceived;
     public event Action<AccountSession, ScriptQuestionEventArgs>? PermissionRequested;
 
-    public AccountSession()
+    public AccountSession(Action<Action>? post = null)
     {
         Outfit = new CurrentOutfitFolder(Client);
-        Rlv = new RlvSession(Client, Outfit, GtkDispatch.Post);
+        Rlv = new RlvSession(Client, Outfit, post ?? GtkDispatch.Post);
         Rlv.Message += OnRlvMessage;
         Rlv.Changed += OnRlvChanged;
         Net = new NetCom(Client);
@@ -81,6 +83,28 @@ internal sealed class AccountSession : IDisposable
     public bool SendNearbyChat(string message)
     {
         if (!IsConnected || string.IsNullOrWhiteSpace(message)) return false;
+        var requestedChannel = 0;
+        var prefix = ChatChannelPrefix.Match(message);
+        if (prefix.Success)
+        {
+            if (!int.TryParse(prefix.Groups["channel"].Value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out requestedChannel))
+            {
+                ChatLine?.Invoke(this, $"[{DateTime.Now:HH:mm}] Invalid chat channel number.");
+                return false;
+            }
+            message = prefix.Groups["message"].Value;
+            if (string.IsNullOrWhiteSpace(message)) return false;
+        }
+        if (requestedChannel != 0)
+        {
+            if (Rlv.Enabled && !Rlv.Service.Permissions.CanChat(requestedChannel, message))
+            {
+                OnRlvMessage($"[RLV] Sending chat on channel {requestedChannel} is restricted.");
+                return false;
+            }
+            Net.ChatOut(message, ChatType.Normal, requestedChannel);
+            return true;
+        }
         var type = ChatType.Normal;
         if (Rlv.Enabled)
         {

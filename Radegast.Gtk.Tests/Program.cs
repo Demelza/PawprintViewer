@@ -10,6 +10,65 @@ using Radegast.Gtk;
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Typed chat channel prefixes route only the payload to the chosen channel", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var packets = f.CapturePackets();
+        SetConnected(session, true);
+        try
+        {
+            foreach (var (input, channel, payload) in new[]
+            {
+                ("/9 testcommand on", 9, "testcommand on"),
+                ("/-9 testcommand off", -9, "testcommand off"),
+                ("/+9   more  words", 9, "more  words"),
+                ("/0 public message", 0, "public message"),
+                ("ordinary nearby chat", 0, "ordinary nearby chat"),
+                ("/me waves", 0, "/me waves")
+            })
+            {
+                Check(session.SendNearbyChat(input), "Chat input was unexpectedly rejected");
+                var sent = packets().Single(p => p is ChatFromViewerPacket or ScriptDialogReplyPacket);
+                var actual = sent switch
+                {
+                    ChatFromViewerPacket chat => (chat.ChatData.Channel, Utils.BytesToString(chat.ChatData.Message)),
+                    ScriptDialogReplyPacket negative => (negative.Data.ChatChannel, Utils.BytesToString(negative.Data.ButtonLabel)),
+                    _ => throw new InvalidOperationException("Unexpected chat packet")
+                };
+                Check(actual == (channel, payload),
+                    $"Chat was sent on the wrong channel or included the prefix: {input}");
+            }
+            Check(!session.SendNearbyChat("/2147483648 private command"), "An overflowing channel was accepted");
+            Check(!session.SendNearbyChat("/9   "), "An empty channel command was accepted");
+            Check(!packets().Any(p => p is ChatFromViewerPacket or ScriptDialogReplyPacket), "An invalid channel command was sent");
+        }
+        finally { SetConnected(session, false); }
+        return Task.CompletedTask;
+    }),
+    ("Typed channel commands respect RLV channel locks and public chat redirection", async () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var packets = f.CapturePackets();
+        SetConnected(session, true);
+        try
+        {
+            await f.Command("@sendchat=n,chatnormal=n,emote=n,redirchat:37=n");
+            Check(session.SendNearbyChat("/9 /me testcommand on"), "Public chat restrictions blocked a channel command");
+            var command = packets().OfType<ChatFromViewerPacket>().Single();
+            Check(command.ChatData.Channel == 9 && command.ChatData.Type == (byte)ChatType.Normal &&
+                Utils.BytesToString(command.ChatData.Message) == "/me testcommand on", "A channel command was redirected or altered");
+            Check(session.SendNearbyChat("public message"), "Public chat redirection failed");
+            Check(packets().OfType<ChatFromViewerPacket>().Single().ChatData.Channel == 37, "Public chat was not redirected");
+            await f.Command("@sendchannel_except:9=n");
+            Check(!session.SendNearbyChat("/9 testcommand off"), "A channel-specific RLV lock was ignored");
+            await f.Command("@sendchannel=n");
+            Check(!session.SendNearbyChat("/10 testcommand on"), "The RLV sendchannel restriction was ignored");
+            Check(!packets().OfType<ChatFromViewerPacket>().Any(), "Blocked channel commands were sent or leaked to public chat");
+        }
+        finally { SetConnected(session, false); }
+    }),
     ("Version replies use the script's channel", async () =>
     {
         using var f = new Fixture();
@@ -303,10 +362,13 @@ static void Check(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
+static void SetConnected(AccountSession session, bool connected) =>
+    typeof(Radegast.NetCom).GetProperty(nameof(Radegast.NetCom.IsLoggedIn))!.SetValue(session.Net, connected);
+
 sealed class Fixture : IDisposable
 {
     public UUID Owner { get; } = UUID.Random();
-    public GridClient Client { get; } = new();
+    public GridClient Client { get; }
     public CurrentOutfitFolder Outfit { get; }
     public RlvSession Rlv { get; }
     public Simulator Simulator { get; }
@@ -318,9 +380,12 @@ sealed class Fixture : IDisposable
     public InventoryFolder SharedFolder { get; }
     public List<(int Channel, string Text)> Replies { get; } = new();
     private readonly Guid _issuer = Guid.NewGuid();
+    private readonly bool _ownsSession;
 
-    public Fixture()
+    public Fixture(AccountSession? session = null)
     {
+        Client = session?.Client ?? new();
+        _ownsSession = session == null;
         typeof(AgentManager).GetProperty(nameof(AgentManager.AgentID))!.SetValue(Client.Self, Owner);
         typeof(AgentManager).GetField("localID", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(Client.Self, 42u);
         var store = new LibreMetaverse.Inventory(Client, Owner);
@@ -331,7 +396,7 @@ sealed class Fixture : IDisposable
         SharedFolder = Folder("Cuffs", shared.UUID);
         var objects = Folder("Objects", root.UUID);
         var cof = Folder("Current Outfit", root.UUID, FolderType.CurrentOutfit);
-        Outfit = new CurrentOutfitFolder(Client);
+        Outfit = session?.Outfit ?? new CurrentOutfitFolder(Client);
         typeof(CurrentOutfitFolder).GetProperty(nameof(CurrentOutfitFolder.COF))!.SetValue(Outfit, cof);
         Object = new InventoryObject(UUID.Random()) { Name = "Cuffs (chest)", ParentUUID = objects.UUID, OwnerID = Owner,
             AssetType = AssetType.Object, InventoryType = InventoryType.Object, AttachPoint = AttachmentPoint.Chest };
@@ -353,7 +418,7 @@ sealed class Fixture : IDisposable
             NameValues = new[] { new NameValue($"AttachItemID STRING RW SV {Object.UUID}") } };
         Attachment.PrimData.AttachmentPoint = AttachmentPoint.Chest;
         Simulator.ObjectsPrimitives[Attachment.LocalID] = Attachment;
-        Rlv = new RlvSession(Client, Outfit, action => action(), (channel, text) => Replies.Add((channel, text)));
+        Rlv = session?.Rlv ?? new RlvSession(Client, Outfit, action => action(), (channel, text) => Replies.Add((channel, text)));
 
         InventoryFolder Folder(string name, UUID parent, FolderType type = FolderType.None)
         {
@@ -388,8 +453,11 @@ sealed class Fixture : IDisposable
     }
     public void Dispose()
     {
-        Rlv.Dispose();
-        Outfit.Dispose();
+        if (_ownsSession)
+        {
+            Rlv.Dispose();
+            Outfit.Dispose();
+        }
         Simulator.Dispose();
     }
 }

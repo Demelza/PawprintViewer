@@ -26,7 +26,9 @@ attempt; this version does not store credentials.
   each session's selected tab and chat transcript. The account rail shows each
   avatar's current region and local coordinates.
 - Nearby chat send/receive, and a distance-sorted list of nearby avatars from
-  the current simulator's coarse-location updates.
+  the current simulator's coarse-location updates. Use `/9 testcommand on` to
+  send `testcommand on` on channel 9; signed channel numbers are accepted, and
+  `/0 message` sends public chat. Channel commands respect RLV channel locks.
 - Account-specific logout and unread nearby-chat counts for background accounts.
 - Inventory folder browsing, item details, and per-folder refresh. Folders load
   when opened. The Library is shown when the grid provides it.
