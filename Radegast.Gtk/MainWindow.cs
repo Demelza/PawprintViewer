@@ -7,6 +7,7 @@ internal sealed class MainWindow : Window
 {
     private readonly Box _accountRows = new(Orientation.Vertical, 4);
     private readonly Stack _pages = new();
+    private readonly Stack _nearbyPages = new();
     private readonly Dictionary<AccountSession, SessionWidgets> _sessions = new();
     private readonly Dictionary<AccountSession, HashSet<ScriptDialogWindow>> _scriptDialogs = new();
     private readonly Dictionary<AccountSession, HashSet<ScriptPermissionWindow>> _permissionDialogs = new();
@@ -24,11 +25,11 @@ internal sealed class MainWindow : Window
             Application.Quit();
         };
 
-        var root = new Box(Orientation.Horizontal, 0);
+        // Twenty equal columns give each side pane exactly three columns (15%).
+        var root = new global::Gtk.Grid { ColumnHomogeneous = true };
         Add(root);
 
         var rail = new Box(Orientation.Vertical, 6) { BorderWidth = 6 };
-        rail.SetSizeRequest(185, -1);
         var accountsHeading = new Label("Accounts") { Xalign = 0 };
         rail.PackStart(accountsHeading, false, false, 4);
         var accountScroll = new ScrolledWindow();
@@ -38,12 +39,18 @@ internal sealed class MainWindow : Window
         var addButton = new Button("+ Add account");
         addButton.Clicked += (_, _) => ShowLogin();
         rail.PackStart(addButton, false, false, 0);
-        root.PackStart(rail, false, false, 0);
-        root.PackStart(new Separator(Orientation.Vertical), false, false, 0);
+        root.Attach(rail, 0, 0, 3, 1);
 
         _pages.AddNamed(new Label("Use + Add account to log in."), "empty");
         _pages.VisibleChildName = "empty";
-        root.PackStart(_pages, true, true, 0);
+        var center = new Box(Orientation.Horizontal, 0) { Hexpand = true, Vexpand = true };
+        center.PackStart(new Separator(Orientation.Vertical), false, false, 0);
+        center.PackStart(_pages, true, true, 0);
+        center.PackStart(new Separator(Orientation.Vertical), false, false, 0);
+        root.Attach(center, 3, 0, 14, 1);
+        _nearbyPages.AddNamed(new Box(Orientation.Vertical, 0), "empty");
+        _nearbyPages.VisibleChildName = "empty";
+        root.Attach(_nearbyPages, 17, 0, 3, 1);
     }
 
     private void ShowLogin()
@@ -66,6 +73,7 @@ internal sealed class MainWindow : Window
         _sessions.Add(session, widgets);
         _accountRows.PackStart(widgets.AccountRow, false, false, 0);
         _pages.AddNamed(widgets.Root, session.Id);
+        _nearbyPages.AddNamed(widgets.NearbyPane, session.Id);
         widgets.AccountButton.Clicked += (_, _) => SelectSession(session);
         widgets.LogoutButton.Clicked += (_, _) => RemoveSession(session);
         session.StateChanged += OnStateChanged;
@@ -75,6 +83,7 @@ internal sealed class MainWindow : Window
         session.PermissionRequested += OnPermissionRequested;
         widgets.AccountRow.ShowAll();
         widgets.Root.ShowAll();
+        widgets.NearbyPane.ShowAll();
         SelectSession(session);
     }
 
@@ -83,6 +92,7 @@ internal sealed class MainWindow : Window
         if (!_sessions.TryGetValue(session, out var widgets)) return;
         _selected = session;
         _pages.VisibleChildName = session.Id;
+        _nearbyPages.VisibleChildName = session.Id;
         widgets.UnreadCount = 0;
         foreach (var (account, view) in _sessions)
             view.UpdateAccountLabel(account == session);
@@ -104,6 +114,7 @@ internal sealed class MainWindow : Window
         widgets.Dispose();
         _accountRows.Remove(widgets.AccountRow);
         _pages.Remove(widgets.Root);
+        _nearbyPages.Remove(widgets.NearbyPane);
         session.Dispose();
 
         if (_selected == session)
@@ -114,6 +125,7 @@ internal sealed class MainWindow : Window
             else
             {
                 _pages.VisibleChildName = "empty";
+                _nearbyPages.VisibleChildName = "empty";
                 Title = "Radegast GTK";
             }
         }

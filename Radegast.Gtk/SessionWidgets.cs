@@ -19,6 +19,7 @@ internal sealed class SessionWidgets : IDisposable
     private bool _disposed;
 
     public Box Root { get; }
+    public Box NearbyPane { get; }
     public Box AccountRow { get; }
     public Button AccountButton { get; }
     public Button LogoutButton { get; }
@@ -31,7 +32,8 @@ internal sealed class SessionWidgets : IDisposable
 
         AccountRow = new Box(Orientation.Vertical, 2);
         AccountButton = new Button(session.Name) { TooltipText = "Select account" };
-        LogoutButton = new Button("×") { TooltipText = "Log out this account" };
+        if (AccountButton.Child is Label accountName) accountName.Ellipsize = Pango.EllipsizeMode.End;
+        LogoutButton = new SquareButton("×") { TooltipText = "Log out this account" };
         var accountHeader = new Box(Orientation.Horizontal, 3);
         accountHeader.PackStart(AccountButton, true, true, 0);
         accountHeader.PackStart(LogoutButton, false, false, 0);
@@ -50,18 +52,15 @@ internal sealed class SessionWidgets : IDisposable
         Root = new Box(Orientation.Horizontal, 0);
         Tabs = new Notebook { Scrollable = true };
         Root.PackStart(Tabs, true, true, 0);
-        Root.PackStart(new Separator(Orientation.Vertical), false, false, 0);
 
-        var nearbyPane = new Box(Orientation.Vertical, 6);
-        nearbyPane.SetSizeRequest(220, -1);
+        NearbyPane = new Box(Orientation.Vertical, 6) { BorderWidth = 8 };
         var nearbyHeading = new Label("Nearby avatars") { Xalign = 0 };
-        nearbyPane.PackStart(nearbyHeading, false, false, 8);
+        NearbyPane.PackStart(nearbyHeading, false, false, 8);
         var nearbyScroll = new ScrolledWindow();
         nearbyScroll.SetPolicy(PolicyType.Never, PolicyType.Automatic);
         _nearbyList = new ListBox { SelectionMode = SelectionMode.None };
         nearbyScroll.Add(_nearbyList);
-        nearbyPane.PackStart(nearbyScroll, true, true, 0);
-        Root.PackStart(nearbyPane, false, false, 8);
+        NearbyPane.PackStart(nearbyScroll, true, true, 0);
 
         var chatPage = new Box(Orientation.Vertical, 6) { BorderWidth = 8 };
         var chatScroll = new ScrolledWindow();
@@ -131,7 +130,8 @@ internal sealed class SessionWidgets : IDisposable
             _nearbyList.Remove(child);
 
         if (_session.Rlv.Enabled && !_session.Rlv.Service.Permissions.CanShowNearby())
-            _nearbyList.Add(new Label("Nearby avatars hidden by RLV") { Xalign = 0, Margin = 8 });
+            _nearbyList.Add(new Label("Nearby avatars hidden by RLV")
+                { Xalign = 0, Margin = 8, Ellipsize = Pango.EllipsizeMode.End });
         else if (_session.Nearby.Count == 0)
         {
             var empty = new Label("No nearby avatars") { Xalign = 0, Margin = 8 };
@@ -146,7 +146,8 @@ internal sealed class SessionWidgets : IDisposable
                 {
                     Xalign = 0,
                     Margin = 6,
-                    TooltipText = showName ? person.Id.ToString() : null
+                    Ellipsize = Pango.EllipsizeMode.End,
+                    TooltipText = showName ? $"{person.Name} · {person.Distance} m\n{person.Id}" : null
                 };
                 _nearbyList.Add(label);
             }
@@ -158,7 +159,9 @@ internal sealed class SessionWidgets : IDisposable
     {
         var unread = UnreadCount > 0 ? $" ({UnreadCount})" : string.Empty;
         AccountButton.Label = $"{(selected ? "› " : "")}{_session.Name}{unread}";
-        AccountButton.TooltipText = _session.Status;
+        // Gtk.Button replaces its child label when its text changes.
+        if (AccountButton.Child is Label accountName) accountName.Ellipsize = Pango.EllipsizeMode.End;
+        AccountButton.TooltipText = $"{_session.Name}\n{_session.Status}";
         UpdateLocation();
         UpdateBalance();
     }

@@ -24,12 +24,16 @@ applied.
 
 - The left rail shows logged-in accounts and keeps the add-account button at
   its bottom. It shows connection state and unread activity per account. Each
-  account has its name and logout button on one line, a full-width location
-  line below, and a balance line formatted like `69,420 L$`.
+  account has its name and square logout button on one line, a full-width
+  location line below, and a balance line formatted like `69,420 L$`.
 - The central tab strip belongs to the selected account. Initial tabs are
   Nearby Chat, IMs, Group Chats, Inventory, Attachments, and Friends.
 - The right pane always shows nearby avatars for the selected account, ordered
   by distance. It updates after movement, teleport, or account selection.
+- The account rail and nearby pane each use 15% of the window width, with 70%
+  for the central tabs. These proportions follow window resizing; there are no
+  draggable dividers. Long account and nearby-avatar names are ellipsized, with
+  their full names available in tooltips.
 - Switching accounts preserves each connection, selected tab, open conversation,
   and unread state. Logging out one account leaves the others connected.
 - The window remains open when all accounts are logged out, so the add-account
