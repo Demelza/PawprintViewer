@@ -101,12 +101,15 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
 
     internal Task ProcessCommandAsync(string message, Guid source, string name) => QueueAsync(async (service, token) =>
     {
+        if (DebugCommands) Notify($"{name}: {message}");
         var processed = true;
         string? failure = null;
         foreach (var command in message.TrimStart('@').Split(','))
         {
             token.ThrowIfCancellationRequested();
             var behavior = command.Split(':', '=')[0].ToLowerInvariant();
+            var previousRequest = _inventoryRequest.Value;
+            _inventoryRequest.Value = InventoryRequestFor(command, behavior);
             if (behavior.StartsWith("setenv_", StringComparison.Ordinal) || behavior.StartsWith("getenv_", StringComparison.Ordinal) ||
                 behavior.StartsWith("setdebug_", StringComparison.Ordinal) || behavior.StartsWith("getdebug_", StringComparison.Ordinal))
                 service.Blacklist.BlacklistBehavior(behavior);
@@ -121,6 +124,7 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
                 failure = ex.Message;
                 Notify($"{name}: {behavior} failed: {ex.Message}");
             }
+            finally { _inventoryRequest.Value = previousRequest; }
         }
         token.ThrowIfCancellationRequested();
         SetStatus(processed ? "Command processed." : failure ?? "Some commands were unavailable or could not be applied.");

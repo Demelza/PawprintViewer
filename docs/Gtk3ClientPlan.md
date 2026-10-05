@@ -68,7 +68,10 @@ The RLV tab shows each account's active restrictions and enable switch.
 Inventory, attachment touch, nearby chat, and displayed names/location now use
 that account's permissions. The shared command engine handles inventory queries
 and forced outfit, sit, teleport, rotation, and group operations. Script
-permission requests have separate GTK prompts. See the
+permission requests have separate GTK prompts. Shared inventory is rooted at
+`My Inventory/#RLV`; folder listings and outfit operations fetch the requested
+path, resolve item links, and retain locks from other shared folders. Diagnostics
+show commands, the shared root, and channel replies. See the
 [GTK README](../Radegast.Gtk/README.md#rlv--rlva) for supported features,
 limitations, and the regression-check command.
 

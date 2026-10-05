@@ -8,7 +8,11 @@ internal sealed partial class RlvSession
     public Task SendReplyAsync(int channel, string message, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (channel != 0 && Enabled) _sendReply(channel, message);
+        if (channel != 0 && Enabled)
+        {
+            _sendReply(channel, message);
+            if (DebugCommands) Notify($"Reply on channel {channel}: {message}");
+        }
         return Task.CompletedTask;
     }
 

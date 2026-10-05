@@ -1,7 +1,9 @@
 using System.Net;
 using System.Reflection;
+using System.Threading.Channels;
 using LibreMetaverse;
 using LibreMetaverse.Appearance;
+using LibreMetaverse.Packets;
 using LibreMetaverse.RLV;
 using Radegast.Gtk;
 
@@ -99,6 +101,129 @@ var tests = new (string Name, Func<Task> Run)[]
         Check(f.Replies.Any(r => r == (1002, "1")) && f.Replies.Any(r => r == (1003, "1")), "Worn-state query replies incorrect");
         Check(f.Replies.Any(r => r.Channel == 1004 && r.Text.Length > 0), "Shared worn-state reply missing");
     }),
+    ("Shared folder paths accept leading and trailing separators", async () =>
+    {
+        using var f = new Fixture();
+        await f.Command("@getinvworn:Cuffs/=1051,getinvworn:/Cuffs/=1052");
+        Check(f.Replies.Contains((1051, "|22")) && f.Replies.Contains((1052, "|22")),
+            "A trailing separator made an existing outfit folder disappear");
+    }),
+    ("An unloaded inventory discovers the real #RLV root and resolves outfit links", async () =>
+    {
+        using var f = new Fixture();
+        var oldStore = f.Client.Inventory.Store!;
+        var outfits = new InventoryFolder(UUID.Random()) { Name = "Midori_Outfits", ParentUUID = f.SharedFolder.ParentUUID, OwnerID = f.Owner };
+        var outfit = new InventoryFolder(UUID.Random()) { Name = "Casual", ParentUUID = outfits.UUID, OwnerID = f.Owner };
+        oldStore.UpdateNodeFor(outfits);
+        oldStore.UpdateNodeFor(outfit);
+        f.SharedFolder.Name = "Accessories";
+        f.SharedFolder.ParentUUID = outfit.UUID;
+        oldStore.UpdateNodeFor(f.SharedFolder);
+        using var server = new InventoryServer(f.Client, f.Simulator);
+        var store = new LibreMetaverse.Inventory(f.Client, f.Owner) { RootFolder = oldStore.RootFolder };
+        typeof(InventoryManager).GetField("_Store", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(f.Client.Inventory, store);
+        await f.Command("@getinv=1101,getinv:Midori_Outfits/Casual/=1104,getinvworn:Midori_Outfits/Casual/Accessories/=1102,getpathnew:chest=1103");
+        Check(f.Replies.Contains((1101, "Midori_Outfits")), "#RLV was not discovered from the server's root inventory response");
+        Check(f.Replies.Contains((1104, "Accessories")), "A nested outfit path was not loaded from the partial skeleton");
+        Check(f.Replies.Contains((1102, "|22")), "Shared links or their worn state were missing from the unloaded inventory");
+        Check(f.Replies.Contains((1103, "Midori_Outfits/Casual/Accessories")), "Reported outfit path was not relative to #RLV");
+        Check(server.FolderRequests.Contains(f.SharedFolder.UUID), "Shared outfit contents were never fetched");
+    }),
+    ("Folder listing replies do not depend on an unrelated outfit loading", async () =>
+    {
+        using var f = new Fixture();
+        using var server = new InventoryServer(f.Client, f.Simulator);
+        f.Client.Inventory.Store!.GetNodeFor(f.SharedFolder.UUID).NeedsUpdate = true;
+        server.FailedFolders.Add(f.SharedFolder.UUID);
+        await f.Command("@getinv=1201");
+        Check(f.Replies.Contains((1201, "Cuffs")), "An unrelated folder's failed contents fetch prevented the root folder listing");
+        Check(!server.FolderRequests.Contains(f.SharedFolder.UUID), "Listing root folder names fetched an outfit's contents");
+    }),
+    ("Attachover and detach resolve actual item IDs without loading unrelated outfits", async () =>
+    {
+        using var f = new Fixture();
+        var store = f.Client.Inventory.Store!;
+        f.Shirt.ParentUUID = f.Object.ParentUUID;
+        f.Unworn.ParentUUID = f.Object.ParentUUID;
+        store.UpdateNodeFor(f.Shirt);
+        store.UpdateNodeFor(f.Unworn);
+        var other = new InventoryFolder(UUID.Random()) { Name = "Other outfit", ParentUUID = f.SharedFolder.ParentUUID, OwnerID = f.Owner };
+        store.UpdateNodeFor(other);
+        using var server = new InventoryServer(f.Client, f.Simulator);
+        server.FailedFolders.Add(other.UUID);
+        // Simulate login's folder skeleton and an outfit link whose object is not rezzed yet.
+        store.GetNodeFor(f.SharedFolder.UUID).NeedsUpdate = true;
+        store.RemoveNodeFor(f.Object);
+        store.RemoveNodeFor(f.ObjectLink);
+        f.Simulator.ObjectsPrimitives.TryRemove(f.Attachment.LocalID, out _);
+        var packets = f.CapturePackets();
+        await f.Command("@attachover:/Cuffs/=force");
+        var added = packets().OfType<RezSingleAttachmentFromInvPacket>().SingleOrDefault();
+        Check(added != null && added.ObjectData.ItemID == f.Object.UUID && added.ObjectData.AttachmentPt == (128 | (byte)AttachmentPoint.Chest),
+            "Attachover did not request the actual linked object at its attachment point with add semantics");
+        await f.Command("@detach:Cuffs/=force");
+        var removed = packets().OfType<DetachAttachmentIntoInvPacket>().SingleOrDefault();
+        Check(removed?.ObjectData.ItemID == f.Object.UUID, "Detach did not request removal of the actual linked object");
+        Check(!server.FolderRequests.Contains(other.UUID), "An outfit action depended on another outfit's unavailable contents");
+    }),
+    ("A cached root missing #RLV is refreshed before reporting an empty inventory", async () =>
+    {
+        using var f = new Fixture();
+        using var server = new InventoryServer(f.Client, f.Simulator);
+        var root = f.Client.Inventory.Store!.RootFolder!;
+        var store = new LibreMetaverse.Inventory(f.Client, f.Owner) { RootFolder = root };
+        store.GetNodeFor(root.UUID).NeedsUpdate = false;
+        typeof(InventoryManager).GetField("_Store", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(f.Client.Inventory, store);
+        await f.Command("@getinv=1301");
+        Check(f.Replies.Contains((1301, "Cuffs")), "An outdated cached root hid #RLV");
+        Check(server.FolderRequests.Contains(root.UUID), "The missing shared root was never checked with the server");
+    }),
+    ("Current outfit queries fetch unresolved links outside #RLV", async () =>
+    {
+        using var f = new Fixture();
+        var store = f.Client.Inventory.Store!;
+        f.Shirt.ParentUUID = f.Object.ParentUUID;
+        store.UpdateNodeFor(f.Shirt);
+        using var server = new InventoryServer(f.Client, f.Simulator);
+        store.RemoveNodeFor(f.Shirt);
+        store.GetNodeFor(f.SharedFolder.UUID).NeedsUpdate = true;
+        server.FailedFolders.Add(f.SharedFolder.UUID);
+        await f.Command("@getoutfit:shirt=1401");
+        Check(f.Replies.Contains((1401, "1")), "An unresolved Current Outfit link hid a worn wearable outside #RLV");
+        Check(server.FolderRequests.Count == 0, "A wearable query fetched shared folders unnecessarily");
+    }),
+    ("Failed folder parsing remains retryable", async () =>
+    {
+        using var f = new Fixture();
+        using var server = new InventoryServer(f.Client, f.Simulator);
+        var node = f.Client.Inventory.Store!.GetNodeFor(f.SharedFolder.UUID);
+        node.NeedsUpdate = true;
+        server.MalformedFolders.Add(f.SharedFolder.UUID);
+        await f.Command("@getinvworn:Cuffs=1501");
+        Check(node.NeedsUpdate && f.Replies.All(r => r.Channel != 1501), "A failed server response was accepted as a loaded outfit");
+        server.MalformedFolders.Clear();
+        await f.Command("@getinvworn:Cuffs=1502");
+        Check(f.Replies.Contains((1502, "|22")), "The failed folder was not retried successfully");
+    }),
+    ("An action through one link respects another folder's lock after a refresh", async () =>
+    {
+        using var f = new Fixture();
+        var store = f.Client.Inventory.Store!;
+        var other = new InventoryFolder(UUID.Random()) { Name = "Locked outfit", ParentUUID = f.SharedFolder.ParentUUID, OwnerID = f.Owner };
+        store.UpdateNodeFor(other);
+        store.GetNodeFor(other.UUID).NeedsUpdate = false;
+        var link = new InventoryItem(UUID.Random()) { Name = f.Object.Name, ParentUUID = other.UUID, OwnerID = f.Owner,
+            AssetType = AssetType.Link, InventoryType = InventoryType.Object, AssetUUID = f.Object.UUID };
+        store.UpdateNodeFor(link);
+        await f.Command("@detachallthis:Locked outfit=n");
+        using var server = new InventoryServer(f.Client, f.Simulator);
+        store.RemoveNodeFor(link);
+        store.GetNodeFor(other.UUID).NeedsUpdate = true;
+        var packets = f.CapturePackets();
+        await f.Command("@detach:Cuffs=force");
+        Check(server.FolderRequests.Contains(other.UUID), "The locked folder's link was not refreshed");
+        Check(!packets().OfType<DetachAttachmentIntoInvPacket>().Any(), "A folder lock was bypassed through another inventory link");
+    }),
     ("Neighboring simulators cannot replace this avatar's attachment state", () =>
     {
         using var f = new Fixture();
@@ -150,7 +275,7 @@ var tests = new (string Name, Func<Task> Run)[]
     {
         using var f = new Fixture();
         f.Client.Inventory.Store!.GetNodeFor(f.SharedFolder.UUID).NeedsUpdate = true;
-        await f.Command("@getinv=321,sendchat=n");
+        await f.Command("@getinvworn:Cuffs=321,sendchat=n");
         Check(!f.Rlv.Service.Permissions.CanSendChat(), "A failed query discarded the restriction after it");
     }),
     ("Touch restrictions distinguish body attachments and HUDs", async () =>
@@ -246,6 +371,21 @@ sealed class Fixture : IDisposable
     }
 
     public Task Command(string text, Guid? issuer = null) => Rlv.ProcessCommandAsync(text, issuer ?? _issuer, "Test object");
+    public Func<List<Packet>> CapturePackets()
+    {
+        var outbox = Channel.CreateUnbounded<NetworkManager.OutgoingPacket>();
+        typeof(NetworkManager).GetField("_packetOutbox", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(Client.Network, outbox);
+        return () =>
+        {
+            var packets = new List<Packet>();
+            while (outbox.Reader.TryRead(out var sent))
+            {
+                var end = sent.Buffer.DataLength - 1;
+                packets.Add(Packet.BuildPacket(sent.Buffer.Data, ref end, new byte[65536]));
+            }
+            return packets;
+        };
+    }
     public void Dispose()
     {
         Rlv.Dispose();

@@ -7,6 +7,28 @@ internal sealed partial class RlvSession
 {
     private readonly SemaphoreSlim _inventoryLoad = new(1, 1);
     private readonly AsyncLocal<AttachmentPoint?> _requestedPoint = new();
+    private readonly AsyncLocal<InventoryRequest?> _inventoryRequest = new();
+    private sealed record InventoryRequest(string Path, bool Recursive, bool Worn, bool Shared = true, bool HonorLocks = false);
+
+    private static string CommandOption(string command)
+    {
+        var colon = command.IndexOf(':');
+        var equals = command.LastIndexOf('=');
+        return colon >= 0 && equals > colon ? command[(colon + 1)..equals] : "";
+    }
+
+    private static InventoryRequest? InventoryRequestFor(string command, string behavior)
+    {
+        var path = CommandOption(command);
+        if (behavior == "getinv") return new(path, Recursive: false, Worn: false);
+        if (behavior == "getinvworn") return new(path, Recursive: true, Worn: true);
+        if (behavior is "getattach" or "getoutfit") return new("", Recursive: false, Worn: true, Shared: false);
+        if (command.EndsWith("=force", StringComparison.OrdinalIgnoreCase) &&
+            behavior is "attach" or "attachall" or "attachover" or "attachallover" or "attachoverorreplace" or
+                "attachalloverorreplace" or "detach" or "detachall" or "remattach" or "remoutfit")
+            return new(path, Recursive: behavior.Contains("all"), Worn: true, HonorLocks: true);
+        return null; // Searches and restrictions require the complete shared tree.
+    }
 
     private InventoryItem? Resolve(InventoryItem item)
     {
@@ -25,16 +47,103 @@ internal sealed partial class RlvSession
     private InventoryFolder? SharedRoot => _client.Inventory.Store?.RootFolder is { } root
         ? Contents(root.UUID).OfType<InventoryFolder>().FirstOrDefault(f => f.Name == "#RLV") : null;
 
-    private async Task LoadFolderAsync(UUID id, CancellationToken token)
+    private async Task LoadFolderAsync(UUID id, CancellationToken token, bool force = false)
     {
         var store = _client.Inventory.Store;
-        if (store == null || !store.TryGetNodeFor(id, out var node) || !node.NeedsUpdate) return;
+        if (store == null || !store.TryGetNodeFor(id, out var node) || (!force && !node.NeedsUpdate)) return;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));
-        await _client.Inventory.RequestFolderContentsAsync(id, _client.Self.AgentID, true, true,
-            InventorySortOrder.ByName, timeout.Token).ConfigureAwait(false);
-        // A failed capability request must not make an incomplete folder look empty.
-        if (node.NeedsUpdate) throw new InvalidOperationException("Shared inventory folder could not be loaded. Try again shortly.");
+        bool? success = null;
+        void Updated(object? _, FolderUpdatedEventArgs e) { if (e.FolderID == id) success = e.Success; }
+        _client.Inventory.FolderUpdated += Updated;
+        try
+        {
+            await _client.Inventory.RequestFolderContentsAsync(id, _client.Self.AgentID, true, true,
+                InventorySortOrder.ByName, timeout.Token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            // The library clears NeedsUpdate before parsing children. A parsing failure
+            // must stay retryable instead of turning a partially loaded folder into an empty one.
+            if (success != true || node.NeedsUpdate)
+            {
+                node.NeedsUpdate = true;
+                throw new InvalidOperationException($"Inventory folder '{node.Data?.Name ?? id.ToString()}' could not be loaded. Try again shortly.");
+            }
+        }
+        finally { _client.Inventory.FolderUpdated -= Updated; }
+    }
+
+    private async Task<UUID?> LoadSharedPathAsync(InventoryFolder shared, string path, CancellationToken token)
+    {
+        await LoadFolderAsync(shared.UUID, token).ConfigureAwait(false);
+        if (path.Length == 0) return shared.UUID;
+        var visited = new HashSet<Guid> { shared.UUID.Guid };
+        while (true)
+        {
+            var map = BuildInventoryMap();
+            if (map.TryGetFolderFromPath(path, false, out var target))
+            {
+                await LoadFolderAsync(new UUID(target.Id), token).ConfigureAwait(false);
+                return new UUID(target.Id);
+            }
+            // Login normally supplies the folder skeleton. With a partial skeleton,
+            // fetch the deepest known ancestor and resolve again after its reply.
+            RlvSharedFolder? ancestor = null;
+            for (var slash = path.LastIndexOf('/'); slash > 0; slash = path.LastIndexOf('/', slash - 1))
+                if (map.TryGetFolderFromPath(path[..slash], false, out ancestor)) break;
+            if (ancestor == null || !visited.Add(ancestor.Id)) return null;
+            await LoadFolderAsync(new UUID(ancestor.Id), token).ConfigureAwait(false);
+        }
+    }
+
+    private async Task LoadSharedTreeAsync(UUID root, bool recursive, CancellationToken token)
+    {
+        var folders = new Queue<UUID>();
+        var seen = new HashSet<UUID>();
+        folders.Enqueue(root);
+        while (folders.Count > 0)
+        {
+            token.ThrowIfCancellationRequested();
+            var batch = new List<UUID>();
+            while (folders.Count > 0 && batch.Count < 4)
+            {
+                var id = folders.Dequeue();
+                if (seen.Add(id)) batch.Add(id);
+            }
+            await Task.WhenAll(batch.Select(id => LoadFolderAsync(id, token))).ConfigureAwait(false);
+            var links = new List<InventoryItem>();
+            foreach (var id in batch)
+            {
+                var contents = Contents(id);
+                if (recursive)
+                    foreach (var folder in contents.OfType<InventoryFolder>()) folders.Enqueue(folder.UUID);
+                links.AddRange(contents.OfType<InventoryItem>().Where(i => i.AssetType == AssetType.Link));
+            }
+            await LoadLinkTargetsAsync(links, token).ConfigureAwait(false);
+        }
+    }
+
+    private async Task LoadLinkTargetsAsync(IEnumerable<InventoryItem> links, CancellationToken token)
+    {
+        // Outfit folders commonly contain hundreds of links. Fetch targets in batches
+        // rather than waiting for a separate HTTP request for every item.
+        var missing = links.Where(i => Resolve(i) == null).Select(i => i.AssetUUID).Distinct().ToArray();
+        if (missing.Length > 0 && _client.Network.CurrentSim?.Caps?.CapabilityURI("FetchInventory2") == null)
+            throw new InvalidOperationException("Inventory item service is not ready. Try again shortly.");
+        foreach (var batch in missing.Chunk(50))
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            await _client.Inventory.RequestFetchInventoryAsync(batch.ToDictionary(id => id, _ => _client.Self.AgentID),
+                cancellationToken: timeout.Token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            if (timeout.IsCancellationRequested) throw new TimeoutException("Inventory link targets could not be loaded in time.");
+            if (DebugCommands)
+            {
+                var unresolved = batch.Count(id => _client.Inventory.Store == null ||
+                    !_client.Inventory.Store.TryGetValue(id, out InventoryBase? entry) || entry is not InventoryItem);
+                if (unresolved > 0) Notify($"The server did not return {unresolved} inventory link target(s); those links are unresolved.");
+            }
+        }
     }
 
     private async Task LoadInventoryAsync(CancellationToken token)
@@ -42,34 +151,38 @@ internal sealed partial class RlvSession
         await _inventoryLoad.WaitAsync(token).ConfigureAwait(false);
         try
         {
+            var request = _inventoryRequest.Value;
             var root = _client.Inventory.Store?.RootFolder;
             if (root == null) throw new InvalidOperationException("Inventory is still initializing.");
-            await LoadFolderAsync(root.UUID, token).ConfigureAwait(false);
-            var shared = SharedRoot;
-            if (shared != null)
+            if (request?.Shared != false)
             {
-                var folders = new Queue<UUID>();
-                var seen = new HashSet<UUID>();
-                folders.Enqueue(shared.UUID);
-                while (folders.Count > 0)
+                var rootWasLoaded = !_client.Inventory.Store!.GetNodeFor(root.UUID).NeedsUpdate;
+                await LoadFolderAsync(root.UUID, token).ConfigureAwait(false);
+                var shared = SharedRoot;
+                // A newly created #RLV folder may be missing from an older cached root.
+                if (shared == null && rootWasLoaded)
                 {
-                    token.ThrowIfCancellationRequested();
-                    var batch = new List<UUID>();
-                    while (folders.Count > 0 && batch.Count < 4)
+                    await LoadFolderAsync(root.UUID, token, force: true).ConfigureAwait(false);
+                    shared = SharedRoot;
+                }
+                if (shared != null)
+                {
+                    if (request == null) await LoadSharedTreeAsync(shared.UUID, true, token).ConfigureAwait(false);
+                    else
                     {
-                        var id = folders.Dequeue();
-                        if (seen.Add(id)) batch.Add(id);
-                    }
-                    await Task.WhenAll(batch.Select(id => LoadFolderAsync(id, token))).ConfigureAwait(false);
-                    foreach (var id in batch)
-                    {
-                        foreach (var folder in Contents(id).OfType<InventoryFolder>()) folders.Enqueue(folder.UUID);
-                        foreach (var link in Contents(id).OfType<InventoryItem>().Where(i => i.IsLink() && i.AssetType == AssetType.Link))
-                            if (Resolve(link) == null) await FetchItemAsync(link.AssetUUID, token).ConfigureAwait(false);
+                        var target = await LoadSharedPathAsync(shared, request.Path, token).ConfigureAwait(false);
+                        if (target.HasValue && request.Worn)
+                            await LoadSharedTreeAsync(target.Value, request.Recursive, token).ConfigureAwait(false);
+                        // Links in another locked folder must still block adding/removing the same item.
+                        if (request.HonorLocks)
+                            foreach (var id in Service.Restrictions.GetLockedFolders().Keys)
+                                await LoadSharedTreeAsync(new UUID(id), false, token).ConfigureAwait(false);
                     }
                 }
             }
-            await _outfit.GetCurrentOutfitLinksAsync(token).ConfigureAwait(false);
+            if (request?.Worn == false) return;
+            var outfitLinks = await _outfit.GetCurrentOutfitLinksAsync(token).ConfigureAwait(false);
+            await LoadLinkTargetsAsync(outfitLinks, token).ConfigureAwait(false);
             foreach (var id in WornIds())
                 if (_client.Inventory.Store != null && !_client.Inventory.Store.TryGetValue(id, out InventoryBase? _))
                     await FetchItemAsync(id, token).ConfigureAwait(false);
@@ -156,7 +269,11 @@ internal sealed partial class RlvSession
     public async Task<(bool Success, InventoryMap? InventoryMap)> TryGetInventoryMapAsync(CancellationToken token)
     {
         await LoadInventoryAsync(token).ConfigureAwait(false);
-        return (true, BuildInventoryMap());
+        var map = BuildInventoryMap();
+        if (DebugCommands)
+            Notify(map.Root.Id == Guid.Empty ? "No #RLV folder was found directly under My Inventory."
+                : $"Shared inventory root: My Inventory/#RLV ({map.Root.Id}); {map.Folders.Count - 1} cached folders, {map.Items.Count} resolved items.");
+        return (true, map);
     }
 
     private static AttachmentPoint SavedPoint(InventoryItem item) => item switch

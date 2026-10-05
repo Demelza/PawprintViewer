@@ -70,7 +70,22 @@ chat and emote restrictions/redirection, touch restrictions, hidden inventory,
 names and location, forced sit/stand/rotation/teleport, active group changes,
 teleport offer restrictions/automatic acceptance, and script permission rules.
 Shared inventory loads on demand, including link targets, without opening the
-Inventory tab. Commands from linked attachment prims apply to their root object.
+Inventory tab. The shared root is the folder named exactly `#RLV` directly under
+**My Inventory**. Paths in commands are relative to that folder: for example,
+`@attachover:Avatar_Outfits/Casual/Accessories=force` uses
+`My Inventory/#RLV/Avatar_Outfits/Casual/Accessories`. Leading and trailing `/`
+separators are accepted; do not include `My Inventory` or `#RLV` in the path.
+Folder listings load only the requested path. Outfit queries and actions load
+the relevant contents and resolve inventory links in batches, while preserving
+locks on the same item linked in another folder. Failed folder responses remain
+retryable, and a missing shared root is checked against the server before an
+empty listing is returned. Current Outfit link targets are fetched even when
+the actual wearable is outside `#RLV`.
+
+For troubleshooting, enable **Show RLV commands and replies in Nearby Chat**
+in the RLV tab. Diagnostics include the actual command, discovered shared-root
+UUID, cached folder/item counts, and the reply sent on the script's channel.
+Commands from linked attachment prims apply to their root object.
 Restrictions from missing objects are removed after a two-minute grace period;
 attachment loading during region changes does not immediately clear locks.
 

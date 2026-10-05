@@ -16,7 +16,7 @@ internal sealed class RlvPanel : Box
         _enabled.Active = rlv.Enabled;
         _enabled.Toggled += (_, _) => rlv.SetEnabled(_enabled.Active);
         PackStart(_enabled, false, false, 0);
-        var debug = new CheckButton("Show RLV commands in Nearby Chat");
+        var debug = new CheckButton("Show RLV commands and replies in Nearby Chat");
         debug.Toggled += (_, _) => rlv.DebugCommands = debug.Active;
         PackStart(debug, false, false, 0);
         PackStart(new Label("Active restrictions") { Xalign = 0 }, false, false, 0);
