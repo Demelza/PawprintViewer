@@ -1,5 +1,6 @@
 using Gtk;
 using LibreMetaverse;
+using LibreMetaverse.Packets;
 using System.Text.RegularExpressions;
 using Task = System.Threading.Tasks.Task;
 using Timeout = GLib.Timeout;
@@ -815,32 +816,57 @@ internal sealed class InventoryPanel : Box
 
     private async Task<bool> MoveToTrashOnServerAsync(InventoryBase selected, UUID trashId)
     {
-        if (Client.AisClient.IsAvailable)
-            return selected is InventoryFolder
-                ? await Client.AisClient.MoveCategoryAsync(selected.UUID, trashId)
-                : await Client.AisClient.MoveItemAsync(selected.UUID, trashId);
-
-        // UDP has no move acknowledgement. Use the move-only overload, then
-        // independently fetch the item or Trash contents to confirm persistence.
+        // Second Life's viewer moves inventory to Trash with these packets.
+        // Send them directly so the library cannot route the move through AIS
+        // or update its local store before the server has processed it.
         if (selected is InventoryFolder)
-            await Client.Inventory.MoveFolderAsync(selected.UUID, trashId);
-        else
-            await Client.Inventory.MoveItemAsync(selected.UUID, trashId);
-
-        for (var attempt = 0; attempt < 4; attempt++)
         {
-            await Task.Delay(700);
+            var move = new MoveInventoryFolderPacket
+            {
+                AgentData = { AgentID = Client.Self.AgentID, SessionID = Client.Self.SessionID, Stamp = true },
+                InventoryData = new MoveInventoryFolderPacket.InventoryDataBlock[1]
+            };
+            move.InventoryData[0] = new MoveInventoryFolderPacket.InventoryDataBlock
+            {
+                FolderID = selected.UUID, ParentID = trashId
+            };
+            move.Header.Reliable = true;
+            Client.Network.SendPacket(move);
+        }
+        else
+        {
+            var move = new MoveInventoryItemPacket
+            {
+                AgentData = { AgentID = Client.Self.AgentID, SessionID = Client.Self.SessionID, Stamp = true },
+                InventoryData = new MoveInventoryItemPacket.InventoryDataBlock[1]
+            };
+            move.InventoryData[0] = new MoveInventoryItemPacket.InventoryDataBlock
+            {
+                ItemID = selected.UUID, FolderID = trashId,
+                NewName = Utils.StringToBytes(string.Empty)
+            };
+            move.Header.Reliable = true;
+            Client.Network.SendPacket(move);
+        }
+
+        // UDP has no acknowledgement. Confirm the new parent with a fresh HTTP
+        // inventory fetch; allow for the server applying the packet asynchronously.
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            await Task.Delay(750);
             if (selected is InventoryItem item)
             {
                 var fetched = await Client.Inventory.FetchItemHttpAsync(item.UUID, Client.Self.AgentID);
                 if (fetched?.ParentUUID == trashId) return true;
+                if (fetched != null) continue;
             }
-            else
-            {
-                var contents = await Client.Inventory.RequestFolderContentsAsync(
-                    trashId, Client.Self.AgentID, true, false, InventorySortOrder.ByName);
-                if (contents.Any(child => child.UUID == selected.UUID)) return true;
-            }
+
+            // FetchInventory2 is not offered on every grid. The Trash listing
+            // also confirms folder moves, which cannot be fetched as single items.
+            var contents = await Client.Inventory.RequestFolderContentsAsync(
+                trashId, Client.Self.AgentID, selected is InventoryFolder,
+                selected is InventoryItem, InventorySortOrder.ByName);
+            if (contents.Any(child => child.UUID == selected.UUID)) return true;
         }
         return false;
     }

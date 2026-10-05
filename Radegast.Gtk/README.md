@@ -36,8 +36,8 @@ attempt; this version does not store credentials.
 - Worn wearables and attachments show a `(worn)` tag. Select an item to use
   **Add**, **Detach**, **Add To**, or **Add To HUD** at the bottom of Item details.
   Select the root Trash folder to use **Empty Trash**, with a confirmation prompt.
-- Moving an item to Trash waits for an acknowledged server move when supported;
-  older grids are checked with a fresh inventory fetch before success is shown.
+- Moving an item or folder to Trash uses the inventory move protocol and checks
+  the server's inventory response before success is shown.
 - Common system folders stay at the top of My Inventory; the Type column uses
   20% of the inventory list, and the fixed details pane uses 25% of the view.
 
