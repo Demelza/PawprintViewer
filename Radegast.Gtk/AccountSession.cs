@@ -5,6 +5,8 @@ using Radegast;
 namespace Radegast.Gtk;
 
 internal sealed record NearbyResident(UUID Id, string Name, int Distance);
+internal sealed record ScriptMenu(UUID ObjectId, string ObjectName, string OwnerName,
+    string Message, int Channel, IReadOnlyList<string> Buttons);
 
 /// <summary>A single grid connection. All public events are delivered on the GTK thread.</summary>
 internal sealed class AccountSession : IDisposable
@@ -28,6 +30,7 @@ internal sealed class AccountSession : IDisposable
     public event Action<AccountSession>? StateChanged;
     public event Action<AccountSession, string>? ChatLine;
     public event Action<AccountSession>? NearbyChanged;
+    public event Action<AccountSession, ScriptMenu>? ScriptDialogReceived;
 
     public AccountSession()
     {
@@ -37,6 +40,7 @@ internal sealed class AccountSession : IDisposable
         Net.ClientDisconnected += OnDisconnected;
         Net.ClientLoggedOut += OnLoggedOut;
         Net.ChatReceived += OnChatReceived;
+        Client.Self.ScriptDialog += OnScriptDialog;
         Client.Grid.CoarseLocationUpdate += OnCoarseLocationUpdate;
         Client.Avatars.UUIDNameReply += OnNameReply;
         Client.Network.RegisterLoginResponseCallback(OnLoginResponse);
@@ -67,6 +71,24 @@ internal sealed class AccountSession : IDisposable
     {
         if (!IsConnected || string.IsNullOrWhiteSpace(message)) return;
         Net.ChatOut(message, ChatType.Normal, 0);
+    }
+
+    public void ReplyToScriptDialog(ScriptMenu menu, int buttonIndex, string label)
+    {
+        if (!IsConnected) throw new InvalidOperationException("This account is disconnected.");
+        Client.Self.ReplyToScriptDialog(menu.Channel, buttonIndex, label, menu.ObjectId);
+    }
+
+    private void OnScriptDialog(object? sender, ScriptDialogEventArgs e)
+    {
+        var owner = string.Join(" ", new[] { e.FirstName, e.LastName }
+            .Where(part => !string.IsNullOrWhiteSpace(part)));
+        var menu = new ScriptMenu(e.ObjectID, e.ObjectName, owner, e.Message,
+            e.Channel, e.ButtonLabels.ToArray());
+        GtkDispatch.Post(() =>
+        {
+            if (!_disposed) ScriptDialogReceived?.Invoke(this, menu);
+        });
     }
 
     private void OnLoginProgress(object? sender, LoginProgressEventArgs e)
@@ -188,6 +210,7 @@ internal sealed class AccountSession : IDisposable
         Net.ClientDisconnected -= OnDisconnected;
         Net.ClientLoggedOut -= OnLoggedOut;
         Net.ChatReceived -= OnChatReceived;
+        Client.Self.ScriptDialog -= OnScriptDialog;
         Client.Grid.CoarseLocationUpdate -= OnCoarseLocationUpdate;
         Client.Avatars.UUIDNameReply -= OnNameReply;
         Client.Network.UnregisterLoginResponseCallback(OnLoginResponse);

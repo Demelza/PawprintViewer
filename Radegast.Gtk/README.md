@@ -40,6 +40,8 @@ attempt; this version does not store credentials.
   the server's inventory response before success is shown.
 - The Attachments tab lists equipped objects and their attachment points, with
   a Touch button for touchable objects and a disabled button for other objects.
+- Script menus and text prompts opened by touched objects appear in their own
+  compact windows; button and text replies go to the correct account.
 - Common system folders stay at the top of My Inventory; the Type column uses
   20% of the inventory list, and the fixed details pane uses 25% of the view.
 
