@@ -8,6 +8,7 @@ internal sealed class ScriptDialogWindow : Window
     private readonly AccountSession _session;
     private readonly ScriptMenu _menu;
     private readonly Label _status = new("") { Xalign = 0, NoShowAll = true };
+    private bool _closing;
 
     public ScriptDialogWindow(Window parent, AccountSession session, ScriptMenu menu)
         : base($"{(string.IsNullOrWhiteSpace(menu.ObjectName) ? "Script menu" : menu.ObjectName)} — {session.Name}")
@@ -18,6 +19,11 @@ internal sealed class ScriptDialogWindow : Window
         DestroyWithParent = true;
         WindowPosition = WindowPosition.CenterOnParent;
         Resizable = false;
+        DeleteEvent += (_, args) =>
+        {
+            args.RetVal = true;
+            CloseMenu();
+        };
 
         var content = new Box(Orientation.Vertical, 10) { BorderWidth = 12 };
         Add(content);
@@ -67,7 +73,7 @@ internal sealed class ScriptDialogWindow : Window
         }
 
         var dismiss = new Button("Dismiss");
-        dismiss.Clicked += (_, _) => Destroy();
+        dismiss.Clicked += (_, _) => CloseMenu();
         content.PackStart(dismiss, false, false, 0);
         content.PackStart(_status, false, false, 0);
         _status.Hide();
@@ -78,12 +84,21 @@ internal sealed class ScriptDialogWindow : Window
         try
         {
             _session.ReplyToScriptDialog(_menu, index, label);
-            Destroy();
         }
         catch (Exception ex)
         {
             _status.Text = $"Could not send reply: {ex.Message}";
             _status.Show();
+            return;
         }
+
+        CloseMenu();
+    }
+
+    public void CloseMenu()
+    {
+        if (_closing) return;
+        _closing = true;
+        Dispose();
     }
 }

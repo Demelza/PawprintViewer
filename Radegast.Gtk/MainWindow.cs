@@ -94,7 +94,7 @@ internal sealed class MainWindow : Window
         session.NearbyChanged -= OnNearbyChanged;
         session.ScriptDialogReceived -= OnScriptDialogReceived;
         if (_scriptDialogs.Remove(session, out var dialogs))
-            foreach (var dialog in dialogs.ToArray()) dialog.Destroy();
+            foreach (var dialog in dialogs.ToArray()) dialog.CloseMenu();
         widgets.Dispose();
         _accountRows.Remove(widgets.AccountRow);
         _pages.Remove(widgets.Root);
