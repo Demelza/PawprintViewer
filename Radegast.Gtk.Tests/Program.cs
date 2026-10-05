@@ -11,6 +11,174 @@ using Radegast.Gtk;
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Private messages use the selected account, resident session and offline delivery", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var other = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        using var g = new Fixture(other);
+        var peer = f.Friend("Recipient Resident").UUID;
+        var packets = f.CapturePackets();
+        var otherPackets = g.CapturePackets();
+        SetConnected(session, true);
+        try
+        {
+            var conversation = session.OpenConversation(peer);
+            conversation.Draft = "/9 private text 日本語";
+            session.SendInstantMessage(peer, conversation.Draft);
+            var sent = packets().OfType<ImprovedInstantMessagePacket>().Single();
+            Check(sent.Header.Reliable && sent.AgentData.AgentID == f.Owner && sent.MessageBlock.ToAgentID == peer &&
+                sent.MessageBlock.ID == (peer ^ f.Owner) && sent.MessageBlock.Dialog == (byte)InstantMessageDialog.MessageFromAgent &&
+                sent.MessageBlock.Offline == (byte)InstantMessageOnline.Offline && !sent.MessageBlock.FromGroup &&
+                Utils.BytesToString(sent.MessageBlock.Message) == "/9 private text 日本語", "Private IM routing or content was changed");
+            Check(conversation.Messages.Single().Outgoing && conversation.Draft == "" && conversation.UnreadCount == 0,
+                "Sent message history, draft or unread state is incorrect");
+            Check(!otherPackets().Any() && other.Conversations.Count == 0, "An IM leaked into another account");
+            Check(ReferenceEquals(conversation, session.OpenConversation(peer)), "Opening an existing conversation created a duplicate");
+        }
+        finally { SetConnected(session, false); }
+        return Task.CompletedTask;
+    }),
+    ("Incoming private IMs preserve sender, repeated messages and offline timestamps per account", async () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var other = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        using var g = new Fixture(other);
+        var peer = UUID.Random();
+        var packet = f.PrivateIm(peer, "Unknown Resident", "hello");
+        packet.MessageBlock.Timestamp = (uint)DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeSeconds();
+        packet.MessageBlock.Offline = (byte)InstantMessageOnline.Offline;
+        await ReceiveIm(f, packet);
+        await ReceiveIm(f, packet);
+        var conversation = session.Conversations.Single();
+        Check(conversation.PeerId == peer && conversation.SessionId == (peer ^ f.Owner) && conversation.Messages.Count == 2 &&
+            conversation.UnreadCount == 2 && conversation.Messages.All(message => !message.Outgoing), "Incoming IMs were lost or misrouted");
+        Check(session.DisplayConversationName(peer) == "Unknown Resident" &&
+            (conversation.Messages[0].Timestamp.ToUniversalTime() - DateTimeOffset.FromUnixTimeSeconds(packet.MessageBlock.Timestamp).UtcDateTime).Duration() < TimeSpan.FromSeconds(1),
+            "The sender name or offline delivery timestamp is incorrect");
+        Check(other.Conversations.Count == 0, "An incoming IM appeared in another account");
+    }),
+    ("Protocol notices, group messages, conferences and wrong recipients do not become private conversations", async () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var peer = UUID.Random();
+        foreach (var dialog in new[] { InstantMessageDialog.SessionSend, InstantMessageDialog.MessageFromObject,
+            InstantMessageDialog.StartTyping, InstantMessageDialog.InventoryOffered, InstantMessageDialog.RequestTeleport })
+        {
+            await ReceiveIm(f, f.PrivateIm(peer, "Resident", "notice", dialog));
+            Check(session.Conversations.Count == 0, $"A {dialog} event became a private conversation");
+        }
+        var group = f.PrivateIm(peer, "Resident", "group");
+        group.MessageBlock.FromGroup = true;
+        group.MessageBlock.ID = UUID.Random();
+        await ReceiveIm(f, group);
+        var conference = f.PrivateIm(peer, "Resident", "conference");
+        conference.MessageBlock.BinaryBucket = new byte[16];
+        await ReceiveIm(f, conference);
+        var wrong = f.PrivateIm(peer, "Resident", "wrong recipient");
+        wrong.MessageBlock.ToAgentID = UUID.Random();
+        await ReceiveIm(f, wrong);
+        await ReceiveIm(f, f.PrivateIm(f.Owner, "Self", "echo"));
+        await ReceiveIm(f, f.PrivateIm(UUID.Zero, "System", "notice"));
+        Check(session.Conversations.Count == 0, "A group, conference, system message or wrong recipient created a private conversation");
+        await ReceiveIm(f, f.PrivateIm(peer, "Resident", "I am busy", InstantMessageDialog.BusyAutoResponse));
+        Check(session.Conversations.Single().Messages.Single().Text == "I am busy", "A resident's busy response was not displayed");
+    }),
+    ("Reading one conversation preserves other unread messages, histories and drafts", async () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var alice = UUID.Random();
+        var bob = UUID.Random();
+        await ReceiveIm(f, f.PrivateIm(alice, "Alice Resident", "one"));
+        await ReceiveIm(f, f.PrivateIm(bob, "Bob Resident", "two"));
+        var conversation = session.Conversations.Single(chat => chat.PeerId == alice);
+        conversation.Draft = "unfinished";
+        session.MarkConversationRead(alice);
+        session.MarkConversationRead(alice);
+        Check(session.UnreadInstantMessages == 1 && conversation.UnreadCount == 0 && conversation.Draft == "unfinished" &&
+            conversation.Messages.Count == 1, "Reading a conversation lost drafts/history or marked another conversation read");
+        SetConnected(session, true);
+        try { Check(ReferenceEquals(session.OpenConversation(alice), conversation), "The draft's conversation was replaced"); }
+        finally { SetConnected(session, false); }
+    }),
+    ("Private IMs reject empty messages, invalid peers and disconnected sends", () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var peer = UUID.Random();
+        var packets = f.CapturePackets();
+        ExpectRejected(() => session.SendInstantMessage(peer, "hello"));
+        SetConnected(session, true);
+        try
+        {
+            ExpectRejected(() => session.SendInstantMessage(peer, "  "));
+            ExpectRejected(() => session.SendInstantMessage(UUID.Zero, "hello"));
+            ExpectRejected(() => session.SendInstantMessage(f.Owner, "hello"));
+            Check(session.Conversations.Count == 0 && !packets().Any(), "An invalid IM changed history or reached the network");
+        }
+        finally { SetConnected(session, false); }
+        return Task.CompletedTask;
+    }),
+    ("RLV prevents starting private IMs but permits established and incoming conversations", async () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var existing = UUID.Random();
+        var incoming = UUID.Random();
+        var newPeer = UUID.Random();
+        var packets = f.CapturePackets();
+        SetConnected(session, true);
+        try
+        {
+            session.OpenConversation(existing);
+            await f.Command("@startim=n");
+            Check(!session.CanOpenConversation(newPeer) && session.CanOpenConversation(existing), "The start IM restriction is incorrect");
+            ExpectRejected(() => session.OpenConversation(newPeer));
+            ExpectRejected(() => session.SendInstantMessage(newPeer, "blocked"));
+            Check(!packets().OfType<ImprovedInstantMessagePacket>().Any(), "A new restricted conversation sent a packet");
+            session.SendInstantMessage(existing, "allowed");
+            await ReceiveIm(f, f.PrivateIm(incoming, "Incoming Resident", "hello"));
+            Check(session.CanOpenConversation(incoming), "An incoming conversation was blocked by startim");
+            session.SendInstantMessage(incoming, "reply");
+            Check(packets().OfType<ImprovedInstantMessagePacket>().Count() == 2, "Existing/incoming conversation replies were blocked");
+        }
+        finally { SetConnected(session, false); }
+    }),
+    ("RLV IM sending and receiving restrictions enforce resident exceptions", async () =>
+    {
+        using var session = new AccountSession(action => action());
+        using var f = new Fixture(session);
+        var allowed = UUID.Random();
+        var blocked = UUID.Random();
+        var packets = f.CapturePackets();
+        SetConnected(session, true);
+        try
+        {
+            var draft = session.OpenConversation(blocked);
+            draft.Draft = "keep this draft";
+            await f.Command($"@sendim=n,sendim:{allowed}=add,recvim=n,recvim:{allowed}=add");
+            Check(!session.CanSendInstantMessage(blocked, "blocked") && session.CanSendInstantMessage(allowed, "allowed"),
+                "RLV sending restrictions or exceptions are incorrect");
+            ExpectRejected(() => session.SendInstantMessage(blocked, draft.Draft));
+            Check(draft.Draft == "keep this draft" && draft.Messages.Count == 0, "A restricted send erased its draft or added a sent line");
+            session.SendInstantMessage(allowed, "allowed");
+            await ReceiveIm(f, f.PrivateIm(blocked, "Blocked Resident", "hidden message"));
+            await ReceiveIm(f, f.PrivateIm(allowed, "Allowed Resident", "visible message"));
+            Check(draft.Messages.Count == 0 && session.Conversations.Single(chat => chat.PeerId == allowed).Messages.Count == 2,
+                "RLV receive restrictions or exceptions are incorrect");
+            Check(packets().OfType<ImprovedInstantMessagePacket>().Single().MessageBlock.ToAgentID == allowed,
+                "A blocked IM reached the network");
+            await f.Command("@clear");
+            await ReceiveIm(f, f.PrivateIm(blocked, "Blocked Resident", "now visible"));
+            Check(draft.Messages.Single().Text == "now visible", "An unlocked resident's message was still hidden");
+            await f.Command("@shownames=n");
+            Check(session.DisplayConversationName(allowed) == "Resident", "A conversation label exposed an RLV-hidden name");
+        }
+        finally { SetConnected(session, false); }
+    }),
     ("Friends sort online first and alphabetically within each group", () =>
     {
         using var session = new AccountSession(action => action());
@@ -694,6 +862,15 @@ static async Task FriendsEvent(AccountSession session, Action change)
     finally { session.FriendsChanged -= Changed; }
 }
 
+static async Task ReceiveIm(Fixture fixture, ImprovedInstantMessagePacket packet)
+{
+    var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    void Received(object? sender, InstantMessageEventArgs e) => completion.TrySetResult();
+    fixture.Client.Self.IM += Received;
+    try { fixture.Receive(packet); await completion.Task.WaitAsync(TimeSpan.FromSeconds(3)); }
+    finally { fixture.Client.Self.IM -= Received; }
+}
+
 sealed class Fixture : IDisposable
 {
     public UUID Owner { get; } = UUID.Random();
@@ -815,6 +992,14 @@ sealed class Fixture : IDisposable
             .GetValue(Client.Network)!;
         events.InvokeRaiseEvent(packet.Type, packet, simulator ?? Simulator);
     }
+
+    public ImprovedInstantMessagePacket PrivateIm(UUID sender, string name, string text,
+        InstantMessageDialog dialog = InstantMessageDialog.MessageFromAgent) => new()
+    {
+        AgentData = { AgentID = sender },
+        MessageBlock = { FromAgentName = Utils.StringToBytes(name), Message = Utils.StringToBytes(text),
+            ToAgentID = Owner, ID = sender ^ Owner, Dialog = (byte)dialog, BinaryBucket = Array.Empty<byte>() }
+    };
 
     public Func<List<Packet>> CapturePackets()
     {

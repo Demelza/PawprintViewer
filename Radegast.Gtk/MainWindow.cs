@@ -78,6 +78,7 @@ internal sealed class MainWindow : Window
         widgets.LogoutButton.Clicked += (_, _) => RemoveSession(session);
         session.StateChanged += OnStateChanged;
         session.ChatLine += OnChatLine;
+        session.ConversationChanged += OnConversationChanged;
         session.NearbyChanged += OnNearbyChanged;
         session.ScriptDialogReceived += OnScriptDialogReceived;
         session.PermissionRequested += OnPermissionRequested;
@@ -95,7 +96,10 @@ internal sealed class MainWindow : Window
         _nearbyPages.VisibleChildName = session.Id;
         widgets.UnreadCount = 0;
         foreach (var (account, view) in _sessions)
+        {
+            view.SetSelected(account == session);
             view.UpdateAccountLabel(account == session);
+        }
         Title = $"{session.Name} — Radegast GTK";
     }
 
@@ -104,6 +108,7 @@ internal sealed class MainWindow : Window
         if (!_sessions.Remove(session, out var widgets)) return;
         session.StateChanged -= OnStateChanged;
         session.ChatLine -= OnChatLine;
+        session.ConversationChanged -= OnConversationChanged;
         session.NearbyChanged -= OnNearbyChanged;
         session.ScriptDialogReceived -= OnScriptDialogReceived;
         session.PermissionRequested -= OnPermissionRequested;
@@ -147,6 +152,11 @@ internal sealed class MainWindow : Window
             widgets.UnreadCount++;
             widgets.UpdateAccountLabel(false);
         }
+    }
+
+    private void OnConversationChanged(AccountSession session, ImConversation conversation)
+    {
+        if (_sessions.TryGetValue(session, out var widgets)) widgets.UpdateAccountLabel(session == _selected);
     }
 
     private void OnNearbyChanged(AccountSession session)

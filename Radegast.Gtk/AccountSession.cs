@@ -199,6 +199,8 @@ internal sealed partial class AccountSession : IDisposable
 
     private void OnInstantMessage(object? sender, InstantMessageEventArgs e)
     {
+        if (_disposed) return;
+        ReceivePrivateInstantMessage(e.IM);
         if (_disposed || !Rlv.Enabled || e.IM.Dialog != InstantMessageDialog.RequestTeleport) return;
         var permissions = Rlv.Service.Permissions;
         if (!permissions.CanTPLure(e.IM.FromAgentID.Guid))
@@ -218,7 +220,10 @@ internal sealed partial class AccountSession : IDisposable
             Status = status == LoginStatus.Success ? "Connected" :
                 status == LoginStatus.Failed ? "Login failed" : message;
             if (status == LoginStatus.Success)
+            {
                 Name = Client.Self.Name;
+                _ = RetrieveOfflineInstantMessagesAsync();
+            }
             StateChanged?.Invoke(this);
             LoginProgress?.Invoke(this, status, message, reason);
         });
@@ -359,6 +364,8 @@ internal sealed partial class AccountSession : IDisposable
             }
             NearbyChanged?.Invoke(this);
             if (resolved.Any(name => Client.Friends.FriendList.ContainsKey(name.Key))) FriendsChanged?.Invoke(this);
+            foreach (var (id, _) in resolved)
+                if (_conversations.TryGetValue(id, out var conversation)) ConversationChanged?.Invoke(this, conversation);
         });
     }
 

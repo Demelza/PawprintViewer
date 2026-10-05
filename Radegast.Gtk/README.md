@@ -34,11 +34,21 @@ attempt; this version does not store credentials.
   send `testcommand on` on channel 9; signed channel numbers are accepted, and
   `/0 message` sends public chat. Channel commands respect RLV channel locks.
 - Account-specific logout and unread nearby-chat counts for background accounts.
+- Private IMs have a vertical conversation list on the left and the selected
+  resident's transcript and message field on the right. Send with **Send** or
+  Enter. Incoming messages create conversations without switching away from
+  the current conversation. Histories, selected conversations, and unsent drafts
+  remain separate for each account and resident. Conversations, the IM tab, and
+  the account rail show unread counts; displaying a conversation marks it read.
+  Histories and drafts are kept in memory for the current login only.
+- IMs request offline delivery and retrieve stored offline messages after login.
+  Private messages keep channel prefixes such as `/9` as literal text; channel
+  commands belong in Nearby Chat.
 - Friends are listed with online residents first, alphabetically within each
   group, and a small online indicator. Names and online status update as replies
   arrive; friendship additions/removals also update the list.
 - Each friend has **IM**, **Pay**, and **Offer TP** buttons to the left of their
-  name. IM is disabled until the IM tab is implemented. Pay opens a separate
+  name. IM opens that friend's conversation in the IMs tab. Pay opens a separate
   **Pay**/**Dismiss** window with a digits-only amount field. Only positive whole
   amounts are accepted; amounts over the known balance and invalid/stale
   recipients are rejected. A payment window sends once and closes after the
@@ -84,7 +94,8 @@ command queue, shared inventory, and restrictions.
 
 Supported integrations include attachment and wearable locks, shared-folder
 locks, forced wear/remove actions, `#RLV` inventory and worn-state queries,
-chat and emote restrictions/redirection, touch restrictions, hidden inventory,
+chat and emote restrictions/redirection, private IM start/send/receive restrictions
+and resident exceptions, touch restrictions, hidden inventory,
 names and location, forced sit/stand/rotation/teleport, active group changes,
 teleport offer restrictions/automatic acceptance, and script permission rules.
 
@@ -116,7 +127,7 @@ attachment loading during region changes does not immediately clear locks.
 
 This implements the protocol features connected to the current GTK interface,
 not every RLV/RLVa feature. Camera, rendered environment, viewer debug settings,
-content previews/editing, sharing, IM/group-chat restrictions, and teleport
+content previews/editing, sharing, group chat, and teleport
 requests are unavailable. The unavailable behaviors are listed through
 `@getblacklist` / `@versionnumbl`; they do not start a renderer or audio engine.
 An in-world RLV relay attachment can forward commands to the viewer. A built-in
@@ -135,7 +146,8 @@ For furniture, use two seats with different animations and test both an RLV
 furniture switch and standing. Check from another viewer that the old pose
 stops, the new pose plays, and attachment/AO animations remain active.
 
-The IMs and Group Chats tabs currently show placeholders.
+The Group Chats tab currently shows a placeholder. Group and conference IMs
+are not shown as private conversations.
 Inventory item content editors, previews, rez actions, desktop
 notifications, and notification sounds are also pending.
 The [GTK3 client plan](../docs/Gtk3ClientPlan.md) tracks the intended scope.

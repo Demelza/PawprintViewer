@@ -13,6 +13,7 @@ internal sealed class FriendsPanel : Box
     private bool _active;
     private bool _refreshQueued;
     private bool _disposed;
+    public event Action<UUID>? ImRequested;
 
     public FriendsPanel(AccountSession session) : base(Orientation.Vertical, 6)
     {
@@ -34,6 +35,7 @@ internal sealed class FriendsPanel : Box
             _active = true;
             _session.FriendsChanged += OnFriendsChanged;
             _session.StateChanged += OnFriendsChanged;
+            _session.ConversationChanged += OnConversationChanged;
         }
         Refresh();
     }
@@ -49,6 +51,8 @@ internal sealed class FriendsPanel : Box
             return false;
         });
     }
+
+    private void OnConversationChanged(AccountSession session, ImConversation conversation) => OnFriendsChanged(session);
 
     private void Refresh()
     {
@@ -67,11 +71,13 @@ internal sealed class FriendsPanel : Box
         {
             var row = new Box(Orientation.Horizontal, 10) { Margin = 4 };
             var actions = new Box(Orientation.Horizontal, 6);
-            actions.PackStart(new Button("IM")
+            var im = new Button("IM")
             {
-                Sensitive = false,
-                TooltipText = "Instant messages will be available when the IM tab is implemented."
-            }, false, false, 0);
+                Sensitive = _session.CanOpenConversation(friend.Id),
+                TooltipText = _session.CanOpenConversation(friend.Id) ? "Open an instant message conversation" : "Starting this conversation is restricted by RLV"
+            };
+            im.Clicked += (_, _) => ImRequested?.Invoke(friend.Id);
+            actions.PackStart(im, false, false, 0);
             var pay = new Button("Pay") { Sensitive = _session.CanPayFriend(friend.Id), TooltipText = "Pay this friend" };
             pay.Clicked += (_, _) => OpenPayment(friend.Id);
             actions.PackStart(pay, false, false, 0);
@@ -129,6 +135,7 @@ internal sealed class FriendsPanel : Box
         _disposed = true;
         _session.FriendsChanged -= OnFriendsChanged;
         _session.StateChanged -= OnFriendsChanged;
+        _session.ConversationChanged -= OnConversationChanged;
         foreach (var payment in _payments.Values.ToArray()) payment.ClosePayment();
         _payments.Clear();
     }

@@ -62,8 +62,7 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
             "setdebug", "getdebug", "showworldmap", "showminimap", "shownametags",
             "showhovertext", "showhovertextall", "showhovertexthud", "showhovertextworld",
             "edit", "editobj", "editworld", "editattach", "rez", "viewnote", "viewscript", "viewtexture",
-            "share", "share_sec", "sendim", "sendim_sec", "sendimto", "startim", "startimto",
-            "recvim", "recvim_sec", "recvimfrom", "accepttprequest", "tprequest", "tprequest_sec"
+            "share", "share_sec", "accepttprequest", "tprequest", "tprequest_sec"
         }) service.Blacklist.BlacklistBehavior(behavior);
         service.Restrictions.RestrictionUpdated += OnRestrictionUpdated;
         return service;

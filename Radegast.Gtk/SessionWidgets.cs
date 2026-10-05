@@ -13,6 +13,9 @@ internal sealed class SessionWidgets : IDisposable
     private readonly InventoryPanel _inventoryPanel;
     private readonly AttachmentsPanel _attachmentsPanel;
     private readonly FriendsPanel _friendsPanel;
+    private readonly InstantMessagesPanel _imPanel;
+    private readonly Label _imTabLabel = new("IMs");
+    private bool _selectedAccount;
     private readonly RlvPanel _rlvPanel;
     private readonly Stack _inventoryPages = new();
     private readonly Label _locationLabel = new() { Xalign = 0, MarginStart = 8, Ellipsize = Pango.EllipsizeMode.End };
@@ -86,7 +89,8 @@ internal sealed class SessionWidgets : IDisposable
         chatPage.PackStart(compose, false, false, 0);
         Tabs.AppendPage(chatPage, new Label("Nearby Chat"));
 
-        AddPendingTab("IMs");
+        _imPanel = new InstantMessagesPanel(session);
+        Tabs.AppendPage(_imPanel, _imTabLabel);
         AddPendingTab("Group Chats");
         _inventoryPanel = new InventoryPanel(session);
         _inventoryPages.AddNamed(_inventoryPanel, "inventory");
@@ -95,17 +99,45 @@ internal sealed class SessionWidgets : IDisposable
         _attachmentsPanel = new AttachmentsPanel(session);
         Tabs.AppendPage(_attachmentsPanel, new Label("Attachments"));
         _friendsPanel = new FriendsPanel(session);
+        _friendsPanel.ImRequested += OpenInstantMessages;
         Tabs.AppendPage(_friendsPanel, new Label("Friends"));
         _rlvPanel = new RlvPanel(session.Rlv);
         Tabs.AppendPage(_rlvPanel, new Label("RLV"));
         session.Rlv.Changed += UpdateRestrictions;
-        Tabs.SwitchPage += (_, _) => GtkDispatch.Post(() =>
+        session.ConversationChanged += OnConversationChanged;
+        if (session.Conversations.FirstOrDefault() is { } conversation) OnConversationChanged(session, conversation);
+        Tabs.SwitchPage += (_, args) =>
         {
-            if (Tabs.CurrentPage == 3 && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
-            if (Tabs.CurrentPage == 4) _attachmentsPanel.StartLoading();
-            if (Tabs.CurrentPage == 5) _friendsPanel.StartLoading();
-        });
+            if (_disposed) return;
+            _imPanel.SetDisplayed(_selectedAccount && args.PageNum == 1);
+            GtkDispatch.Post(() =>
+            {
+                if (_disposed) return;
+                if (Tabs.CurrentPage == 3 && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
+                if (Tabs.CurrentPage == 4) _attachmentsPanel.StartLoading();
+                if (Tabs.CurrentPage == 5) _friendsPanel.StartLoading();
+            });
+        };
         UpdateRestrictions();
+    }
+
+    public void SetSelected(bool selected)
+    {
+        _selectedAccount = selected;
+        _imPanel.SetDisplayed(selected && Tabs.CurrentPage == 1);
+    }
+
+    private void OpenInstantMessages(LibreMetaverse.UUID peerId)
+    {
+        if (!_imPanel.Open(peerId)) return;
+        Tabs.CurrentPage = 1;
+        _imPanel.SetDisplayed(_selectedAccount);
+    }
+
+    private void OnConversationChanged(AccountSession account, ImConversation conversation)
+    {
+        var unread = account.UnreadInstantMessages;
+        _imTabLabel.Text = unread > 0 ? $"IMs ({unread})" : "IMs";
     }
 
     private void AddPendingTab(string title)
@@ -160,7 +192,8 @@ internal sealed class SessionWidgets : IDisposable
 
     public void UpdateAccountLabel(bool selected)
     {
-        var unread = UnreadCount > 0 ? $" ({UnreadCount})" : string.Empty;
+        var totalUnread = UnreadCount + _session.UnreadInstantMessages;
+        var unread = totalUnread > 0 ? $" ({totalUnread})" : string.Empty;
         AccountButton.Label = $"{(selected ? "› " : "")}{_session.Name}{unread}";
         // Gtk.Button replaces its child label when its text changes.
         if (AccountButton.Child is Label accountName) accountName.Ellipsize = Pango.EllipsizeMode.End;
@@ -210,6 +243,9 @@ internal sealed class SessionWidgets : IDisposable
     {
         _disposed = true;
         _session.Rlv.Changed -= UpdateRestrictions;
+        _session.ConversationChanged -= OnConversationChanged;
+        _friendsPanel.ImRequested -= OpenInstantMessages;
+        _imPanel.Stop();
         _rlvPanel.Stop();
         _inventoryPanel.Stop();
         _attachmentsPanel.Stop();

@@ -71,7 +71,7 @@ applied.
 ## RLV checkpoint
 
 The RLV tab shows each account's active restrictions and enable switch.
-Inventory, attachment touch, nearby chat, and displayed names/location now use
+Inventory, attachment touch, nearby chat, private IMs, and displayed names/location now use
 that account's permissions. The shared command engine handles inventory queries
 and forced outfit, sit, teleport, rotation, and group operations. Script
 permission requests have separate GTK prompts. Furniture animations are cleaned
@@ -94,7 +94,7 @@ friends appear first with a small indicator; both online and offline groups
 are ordered alphabetically. Name replies, status notifications, and friendship
 changes refresh the appropriate account's list.
 
-IM remains disabled while the IM tab is pending. Pay opens a compact separate
+IM opens the friend's conversation in the IMs tab. Pay opens a compact separate
 window bound to its original account and friend, with a digits-only amount field
 and Pay/Dismiss buttons. Positive whole amounts are checked against the known
 balance, and stale recipients/disconnected accounts cannot send payments.
@@ -102,6 +102,28 @@ Submission sends once, closes the window, and reports subsequent server payment
 replies in that account's Nearby Chat. Closing a payment window or logging out
 does not send money. Offer TP uses the originating account's current location
 and respects RLV location restrictions and the friend's granted map rights.
+
+## Private IM checkpoint
+
+The IMs tab has a vertical list of conversation buttons on the left, with the
+selected conversation's transcript, message field, and Send button on the right.
+Enter also sends. Friends' IM buttons open/select their conversations; incoming
+resident messages create conversations without changing the selected one.
+Each account keeps its own conversations, histories, selection, and per-resident
+drafts while switching tabs and accounts. This state stays in memory for the
+current login; persistent message logs are not implemented.
+
+Unread counts appear beside conversations, on the IM tab, and in the account
+rail. Only the displayed conversation of the selected account is marked read.
+Sending uses the correct avatar session and requests offline delivery. Stored
+offline messages are retrieved after login. IM text is private even if it starts
+with a Nearby Chat channel prefix.
+
+Private IM start/send/receive restrictions and resident exceptions use the
+account's RLV permissions. Restricted sends keep the draft, blocked incoming
+messages are not displayed, and hidden names/location are redacted in the UI.
+Group/conference messages, script messages, and other IM protocol events do not
+become private conversations. The Group Chats tab remains pending.
 
 ## First working checkpoint
 
