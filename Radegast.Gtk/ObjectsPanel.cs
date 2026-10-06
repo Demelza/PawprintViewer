@@ -3,12 +3,13 @@ using LibreMetaverse;
 
 namespace Radegast.Gtk;
 
-/// <summary>Rezzed objects near one account, with sit and stand actions.</summary>
+/// <summary>Rezzed objects near one account, with touch, sit and stand actions.</summary>
 internal sealed class ObjectsPanel : Box
 {
     private readonly AccountSession _session;
     private readonly ListBox _list = new() { SelectionMode = SelectionMode.None };
     private readonly Dictionary<UUID, ObjectRow> _rows = new();
+    private readonly HashSet<UUID> _touching = new();
     private readonly Dictionary<UUID, (DateTime Sent, int Attempts)> _nameRequests = new();
     private readonly Button _stand = new("Stand");
     private readonly Label _status = new("Objects within 50 m") { Xalign = 0 };
@@ -114,11 +115,12 @@ internal sealed class ObjectsPanel : Box
         {
             if (!_rows.TryGetValue(item.Id, out var row))
             {
-                row = new ObjectRow(item, Sit);
+                row = new ObjectRow(item, Touch, Sit);
                 _rows.Add(item.Id, row);
                 _list.Add(row);
             }
-            row.Update(item, _busy ? "Another sit request is pending." : _session.ObjectSitError(item), _session.RedactText(item.Name));
+            row.Update(item, _touching.Contains(item.Id) ? "Touch is being sent." : _session.ObjectTouchError(item),
+                _busy ? "Another sit request is pending." : _session.ObjectSitError(item), _session.RedactText(item.Name));
         }
         _list.InvalidateSort();
         _list.ShowAll();
@@ -178,6 +180,26 @@ internal sealed class ObjectsPanel : Box
         }
     }
 
+    private async void Touch(NearbyObject item)
+    {
+        if (_disposed || !_touching.Add(item.Id)) return;
+        Refresh();
+        try
+        {
+            await _session.TouchObjectAsync(item, _actions.Token).ConfigureAwait(false);
+            GtkDispatch.Post(() => { if (!_disposed) _feedback.Text = $"Touch sent to {_session.RedactText(item.Name)}."; });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            GtkDispatch.Post(() => { if (!_disposed) _feedback.Text = $"Touch failed: {ex.Message}"; });
+        }
+        finally
+        {
+            GtkDispatch.Post(() => { if (!_disposed) { _touching.Remove(item.Id); Refresh(); } });
+        }
+    }
+
     private void Stand()
     {
         try { _session.StandUp(); _feedback.Text = "Stand requested."; }
@@ -200,28 +222,33 @@ internal sealed class ObjectsPanel : Box
     {
         private readonly Label _name = new() { Xalign = 0, Ellipsize = Pango.EllipsizeMode.End };
         private readonly Label _distance = new() { Xalign = 1 };
+        private readonly Button _touch = new("Touch");
         private readonly Button _sit = new("Sit");
         public NearbyObject Item { get; private set; }
 
-        public ObjectRow(NearbyObject item, Action<NearbyObject> sit)
+        public ObjectRow(NearbyObject item, Action<NearbyObject> touch, Action<NearbyObject> sit)
         {
             Item = item;
             var content = new Box(Orientation.Horizontal, 10) { Margin = 4 };
+            _touch.Clicked += (_, _) => touch(Item);
             _sit.Clicked += (_, _) => sit(Item);
+            content.PackStart(_touch, false, false, 0);
             content.PackStart(_sit, false, false, 0);
             content.PackStart(_name, true, true, 0);
             content.PackStart(_distance, false, false, 0);
             Add(content);
         }
 
-        public void Update(NearbyObject item, string? error, string name)
+        public void Update(NearbyObject item, string? touchError, string? sitError, string name)
         {
             Item = item;
             _name.Text = name;
             _name.TooltipText = name;
             _distance.Text = $"{item.Distance:0.0} m";
-            _sit.Sensitive = error == null;
-            _sit.TooltipText = error ?? $"Sit on {name}";
+            _touch.Sensitive = touchError == null;
+            _touch.TooltipText = touchError ?? $"Touch {name}";
+            _sit.Sensitive = sitError == null;
+            _sit.TooltipText = sitError ?? $"Sit on {name}";
         }
     }
 }

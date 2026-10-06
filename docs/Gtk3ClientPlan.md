@@ -100,8 +100,10 @@ excluded. Names load in batches with bounded retries, and the full-height list
 updates while that account's Objects tab is visible. Connected neighboring
 regions use global coordinates so objects near a border have the correct range.
 
-Each row has a **Sit** button to the left of its name and distance. A **Stand**
-button above the list becomes available when seated. Actions recheck the live
+Each row has **Touch** and **Sit** buttons to the left of its name and distance.
+Touch targets a touchable root or linked prim and is disabled for objects without
+touch handlers or when RLV prevents touching them. A **Stand** button above the
+list becomes available when seated. Actions recheck the live
 object and RLV sit, unsit, and sit-distance restrictions. Sit requests wait for
 the appropriate object response and avatar seat update; logout cancels pending
 requests. Standing and switching furniture use the existing animation cleanup.

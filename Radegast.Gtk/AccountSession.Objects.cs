@@ -1,10 +1,15 @@
 using LibreMetaverse;
 using LibreMetaverse.Packets;
+using LibreMetaverse.RLV;
 
 namespace Radegast.Gtk;
 
 internal sealed record NearbyObject(UUID Id, uint LocalId, Simulator Simulator,
-    string Name, double Distance, bool HasName);
+    string Name, double Distance, bool HasName)
+{
+    public UUID TouchId { get; init; }
+    public uint TouchLocalId { get; init; }
+}
 
 internal sealed partial class AccountSession
 {
@@ -29,15 +34,22 @@ internal sealed partial class AccountSession
         foreach (var sim in simulators.Append(current).Distinct())
         {
             if (sim == null || (sim != current && !sim.Connected)) continue;
-            foreach (var prim in sim.ObjectsPrimitives.Values.ToArray())
+            var prims = sim.ObjectsPrimitives.Values.ToArray();
+            var touchableChildren = prims.Where(prim => (prim.Flags & PrimFlags.Touch) != 0).ToLookup(prim => prim.ParentID);
+            foreach (var prim in prims)
             {
                 if (!IsRezzedRoot(prim)) continue;
                 var distance = ObjectDistance(sim, prim, position);
                 if (!double.IsFinite(distance) || distance > ObjectRadius) continue;
                 var name = prim.Properties?.Name;
                 var hasName = !string.IsNullOrWhiteSpace(name);
+                var touchPart = (prim.Flags & PrimFlags.Touch) != 0 ? prim : touchableChildren[prim.LocalID].FirstOrDefault();
                 objects.Add(new(prim.ID, prim.LocalID, sim,
-                    hasName ? name! : $"Object {prim.ID.ToString()[..8]}", distance, hasName));
+                    hasName ? name! : $"Object {prim.ID.ToString()[..8]}", distance, hasName)
+                {
+                    TouchId = touchPart?.ID ?? UUID.Zero,
+                    TouchLocalId = touchPart?.LocalID ?? 0
+                });
             }
         }
         return objects.OrderBy(item => item.Distance)
@@ -56,14 +68,22 @@ internal sealed partial class AccountSession
         return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    public string? ObjectSitError(NearbyObject item)
+    private string? ObjectInteractionError(NearbyObject item, out Primitive? prim, out double distance)
     {
+        prim = null;
+        distance = 0;
         if (_disposed || !IsConnected || Client.Network.CurrentSim == null) return "This account is disconnected.";
         if ((item.Simulator != Client.Network.CurrentSim && !item.Simulator.Connected) ||
-            !item.Simulator.ObjectsPrimitives.TryGetValue(item.LocalId, out var prim) ||
+            !item.Simulator.ObjectsPrimitives.TryGetValue(item.LocalId, out prim) ||
             prim.ID != item.Id || !IsRezzedRoot(prim)) return "This object is no longer available.";
-        var distance = ObjectDistance(item.Simulator, prim, Client.Self.GlobalPosition);
+        distance = ObjectDistance(item.Simulator, prim, Client.Self.GlobalPosition);
         if (!double.IsFinite(distance) || distance > ObjectRadius) return "This object is outside the 50 m radius.";
+        return null;
+    }
+
+    public string? ObjectSitError(NearbyObject item)
+    {
+        if (ObjectInteractionError(item, out _, out var distance) is { } error) return error;
         if (item.Simulator == Client.Network.CurrentSim && IsSeatInObject(item.Simulator, Client.Self.SittingOn, item.LocalId))
             return "You are already sitting on this object.";
         if (Rlv.Enabled)
@@ -75,6 +95,35 @@ internal sealed partial class AccountSession
                 return "Sitting at this distance is restricted by RLV.";
         }
         return null;
+    }
+
+    public string? ObjectTouchError(NearbyObject item) => ObjectTouchError(item, out _);
+
+    private string? ObjectTouchError(NearbyObject item, out Primitive? part)
+    {
+        part = null;
+        if (ObjectInteractionError(item, out var root, out var distance) is { } error) return error;
+        if ((root!.Flags & PrimFlags.Touch) != 0) part = root;
+        else if (item.TouchLocalId != 0 && item.Simulator.ObjectsPrimitives.TryGetValue(item.TouchLocalId, out var child) &&
+                 child.ID == item.TouchId && child.ParentID == root.LocalID && (child.Flags & PrimFlags.Touch) != 0)
+            part = child;
+        if (part == null || part.ID == UUID.Zero) return "This object is not touchable.";
+        if (Rlv.Enabled)
+        {
+            var permissions = Rlv.Service.Permissions;
+            if ((permissions.TryGetMaxFarTouchDistance(out var maxDistance) && distance > maxDistance) ||
+                !permissions.CanTouch(RlvPermissionsService.TouchLocation.RezzedInWorld, root.ID.Guid, null, null) ||
+                !permissions.CanTouch(RlvPermissionsService.TouchLocation.RezzedInWorld, part.ID.Guid, null, null))
+                return "Touching this object is restricted by RLV.";
+        }
+        return null;
+    }
+
+    public async Task TouchObjectAsync(NearbyObject item, CancellationToken token = default)
+    {
+        token.ThrowIfCancellationRequested();
+        if (ObjectTouchError(item, out var part) is { } error) throw new InvalidOperationException(error);
+        await Client.Objects.ClickObjectAsync(item.Simulator, part!.LocalID, token).ConfigureAwait(false);
     }
 
     private static bool IsSeatInObject(Simulator sim, uint seat, uint root)

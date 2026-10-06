@@ -13,6 +13,78 @@ using Radegast.Gtk;
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Object touch targets a touchable root or linked part and rejects stale or non-touchable objects", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var packets = f.CapturePackets();
+        var root = f.Prim(200);
+        root.Position = new Vector3(2, 0, 0);
+        SetConnected(a, true);
+        try
+        {
+            var item = a.GetNearbyObjects().Single();
+            Check(a.ObjectTouchError(item) != null, "A non-touchable object allowed touching");
+            await ExpectTouchRejected(a, item);
+            Check(packets().Count == 0, "A disabled touch sent packets");
+            var child = f.Prim(201, root.LocalID);
+            child.Flags |= PrimFlags.Touch;
+            var unrelated = f.Prim(202, 999);
+            unrelated.Flags |= PrimFlags.Touch;
+            item = a.GetNearbyObjects().Single();
+            Check(item.TouchId == child.ID && a.ObjectTouchError(item) == null, "A touchable linked part was not detected");
+            await a.TouchObjectAsync(item);
+            var sent = packets();
+            Check(sent.OfType<ObjectGrabPacket>().Single().ObjectData.LocalID == child.LocalID &&
+                sent.OfType<ObjectDeGrabPacket>().Single().ObjectData.LocalID == child.LocalID &&
+                sent.OfType<ObjectGrabPacket>().Single().AgentData.AgentID == f.Owner,
+                "Touch did not send grab and release to the linked part for this account");
+            child.Flags &= ~PrimFlags.Touch;
+            await ExpectTouchRejected(a, item);
+            root.Flags |= PrimFlags.Touch;
+            await a.TouchObjectAsync(item);
+            Check(packets().OfType<ObjectGrabPacket>().Single().ObjectData.LocalID == root.LocalID,
+                "A newly touchable root was not used");
+            root.Flags &= ~PrimFlags.Touch;
+            f.Prim(child.LocalID, unrelated.LocalID).Flags |= PrimFlags.Touch;
+            await ExpectTouchRejected(a, item);
+            Check(!packets().OfType<ObjectGrabPacket>().Any(), "A replaced linked part remained touchable through the old row");
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Object touch enforces world, prim, interaction and default far-touch restrictions", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var packets = f.CapturePackets();
+        var root = f.Prim(200);
+        root.Position = new Vector3(2, 0, 0);
+        var child = f.Prim(201, root.LocalID);
+        child.Flags |= PrimFlags.Touch;
+        SetConnected(a, true);
+        try
+        {
+            var item = a.GetNearbyObjects().Single();
+            await f.Command("@touchworld=n");
+            await ExpectTouchRejected(a, item);
+            await f.Command($"@touchworld=y,touchthis:{child.ID}=n");
+            await ExpectTouchRejected(a, item);
+            await f.Command($"@touchthis:{child.ID}=y,touchthis:{root.ID}=n");
+            await ExpectTouchRejected(a, item);
+            await f.Command($"@touchthis:{root.ID}=y,fartouch=n");
+            await ExpectTouchRejected(a, item);
+            root.Position = new Vector3(1, 0, 0);
+            Check(a.ObjectTouchError(item) == null, "Touch within the default 1.5 m limit was blocked");
+            await f.Command("@fartouch=y,interact=n");
+            await ExpectTouchRejected(a, item);
+            Check(packets().Count == 0, "An RLV-blocked touch sent packets");
+            a.Rlv.SetEnabled(false);
+            await a.TouchObjectAsync(item);
+            Check(packets().OfType<ObjectGrabPacket>().Single().ObjectData.LocalID == child.LocalID,
+                "Disabling RLV did not allow touching the object");
+        }
+        finally { SetConnected(a, false); }
+    }),
     ("Nearby objects use a 50 m sphere, exclude attachments and linked children, and stay account-specific", () =>
     {
         using var a = new AccountSession(action => action());
@@ -1265,6 +1337,13 @@ static void SetConnected(AccountSession session, bool connected) =>
 
 static void SetPosition(AccountSession session, Vector3 position) =>
     typeof(AgentManager).GetField("relativePosition", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(session.Client.Self, position);
+
+static async Task ExpectTouchRejected(AccountSession session, NearbyObject item)
+{
+    try { await session.TouchObjectAsync(item); }
+    catch (InvalidOperationException) { return; }
+    throw new InvalidOperationException("An unavailable or restricted touch was accepted");
+}
 
 static async Task WaitUntil(Func<bool> condition)
 {

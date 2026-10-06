@@ -80,8 +80,10 @@ attempt; this version does not store credentials.
 - The Attachments tab lists equipped objects and their attachment points, with
   a Touch button for touchable objects and a disabled button for other objects.
 - The Objects tab lists rezzed objects within a 50 m radius, nearest first,
-  with their names, distances, and a **Sit** button on the left. Linked objects
-  appear once; attachments are excluded. The list updates while displayed,
+  with their names, distances, and **Touch** and **Sit** buttons on the left.
+  Touch is disabled when neither the root nor its linked parts are touchable,
+  or when RLV prevents touching it. Linked objects appear once; attachments
+  are excluded. The list updates while displayed,
   including objects in connected neighboring regions. **Refresh** retries
   missing names. **Stand** becomes available while seated, including ground
   sits. Sit/stand actions respect RLV locks and sitting-distance restrictions;
