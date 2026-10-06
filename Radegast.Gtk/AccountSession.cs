@@ -179,7 +179,8 @@ internal sealed partial class AccountSession : IDisposable
         {
             if (_disposed) return;
             ScriptDialogReceived?.Invoke(this, menu);
-            Notify(NotificationCategory.Menus, $"Menu from {menu.ObjectName}", menu.Message, menu.ObjectId);
+            Notify(NotificationCategory.Menus, string.IsNullOrWhiteSpace(menu.ObjectName) ? "Scripted object" : menu.ObjectName,
+                menu.Message, menu.ObjectId);
         });
     }
 
@@ -290,7 +291,7 @@ internal sealed partial class AccountSession : IDisposable
             if (e.SourceType == ChatSourceType.Agent && !string.IsNullOrWhiteSpace(e.FromName))
                 lock (_nameLock) _names[e.SourceID] = e.FromName;
             ChatLine?.Invoke(this, RedactText($"[{DateTime.Now:HH:mm}] {from}: {e.Message}"));
-            if (IsWornObjectMessage(e)) Notify(NotificationCategory.WornObjects, $"Worn object: {from}", e.Message, e.SourceID);
+            if (IsWornObjectMessage(e)) Notify(NotificationCategory.WornObjects, from, e.Message, e.SourceID);
         });
     }
 

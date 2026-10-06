@@ -125,8 +125,8 @@ internal sealed partial class AccountSession
         _friendPresence[id] = online;
         FriendsChanged?.Invoke(this);
         if (_friendPresenceReady && known && previous != online && IsConnected)
-            Notify(NotificationCategory.Friends, $"{DisplayFriendName(id)} is {(online ? "online" : "offline")}",
-                string.Empty, id);
+            Notify(NotificationCategory.Friends, Name,
+                $"{DisplayFriendName(id)} is {(online ? "online" : "offline")}", id);
     });
     private void OnFriendChanged(object? sender, FriendInfoEventArgs e) => NotifyFriendsChanged();
     private void OnFriendNames(object? sender, FriendNamesEventArgs e) => NotifyFriendsChanged();

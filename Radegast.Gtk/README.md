@@ -44,10 +44,14 @@ attempt; this version does not store credentials.
   Linux desktop popups use the system's `libnotify` runtime and notification daemon.
 - Messages already being viewed in the foreground stay quiet. Background menus
   notify without raising the viewer. Private IM popups show just the sender's
-  name, followed by a single-line preview shortened with an ellipsis. Previews
-  are measured with the system font, with a conservative width for Xfce popups;
+  name above the message preview. Group chats show just the group name above
+  the message preview, and object chat/menus show just the object name above
+  the message. Friend status popups show the logged-in account name above
+  `Friend Name is online/offline`. Message previews use a single line shortened
+  with an ellipsis. They are measured with the system font, with a conservative
+  width for Xfce popups;
   final popup sizing is controlled by the desktop notification theme.
-  Popups have no action buttons. Other categories identify the receiving account.
+  Popups have no action buttons.
   Notifications honor RLV name/location restrictions and replace earlier popups
   for the same conversation. Initial friend statuses and RLV commands
   do not produce notifications. Disabling a category or logging out clears its

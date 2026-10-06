@@ -56,7 +56,7 @@ var tests = new (string Name, Func<Task> Run)[]
             "Short previews were truncated or ellipsis overflowed the available width");
         return Task.CompletedTask;
     }),
-    ("Notification switches apply to every account, suppress visible events and keep IM titles to sender only", () =>
+    ("Notification switches apply to every account, suppress visible events and keep names separate from previews", () =>
     {
         var directory = Path.Combine(Path.GetTempPath(), "pawprint-notification-policy-" + Guid.NewGuid().ToString("N"));
         try
@@ -75,8 +75,8 @@ var tests = new (string Name, Func<Task> Run)[]
             }
             Check(output.Shown.Count == 10 && output.Shown.All(notice => notice.Body == "<b>x & y</b>"),
                 "Visible events were notified or text was escaped before measuring the preview");
-            Check(output.Shown.Where(notice => notice.Category == NotificationCategory.InstantMessages)
-                .All(notice => notice.Title == "Alice Resident"), "Private IM titles included the receiving account or an IM prefix");
+            Check(output.Shown.All(notice => notice.Title == "Alice Resident"),
+                "Notification titles included an account prefix instead of the supplied name");
             Check(output.Shown.Select(notice => notice.AccountId).Distinct().Count() == 2 &&
                 output.Shown.Select(notice => notice.Key).Distinct().Count() == 10, "Accounts shared notification identities");
             foreach (var category in Enum.GetValues<NotificationCategory>()) settings.Update(settings.Value.WithCategory(category, false));
@@ -110,7 +110,7 @@ var tests = new (string Name, Func<Task> Run)[]
             await ReceiveIm(f, f.GroupIm(group, f.Owner, "Me Resident", "own group"));
             await ReceiveIm(f, f.PrivateIm(resident, "Alice Resident", "typing", InstantMessageDialog.StartTyping));
             Check(output.Count == 2 && output[0].Category == NotificationCategory.InstantMessages && output[0].Title == "Alice Resident" && output[0].TargetId == resident &&
-                output[1].Category == NotificationCategory.GroupChats && output[1].TargetId == group && output[1].Message == "Alice Resident: group",
+                output[1].Category == NotificationCategory.GroupChats && output[1].Title == "Test Group" && output[1].TargetId == group && output[1].Message == "group",
                 "Notifications used transcript changes rather than incoming message events");
             await f.Command("@recvim=n");
             await ReceiveIm(f, f.PrivateIm(resident, "Alice Resident", "blocked"));
@@ -133,7 +133,7 @@ var tests = new (string Name, Func<Task> Run)[]
         Chat(child.ID, ChatType.Normal, f.Owner, "public object chat");
         Chat(child.ID, ChatType.OwnerSay, UUID.Random(), "another owner's object");
         Chat(child.ID, ChatType.OwnerSay, f.Owner, "@detach=n");
-        Check(output.Count == 2 && output.All(notice => notice.Category == NotificationCategory.WornObjects) &&
+        Check(output.Count == 2 && output.All(notice => notice.Category == NotificationCategory.WornObjects && notice.Title == "Test object") &&
             output[1].Message == "linked attachment", "Worn/private object chat classification was incorrect");
         return Task.CompletedTask;
 
@@ -166,8 +166,9 @@ var tests = new (string Name, Func<Task> Run)[]
                 { AgentBlock = new[] { new OfflineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
             await FriendsEvent(a, () => f.Receive(new OnlineNotificationPacket
                 { AgentBlock = new[] { new OnlineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
-            lock (dispatch) Check(output.Count == 2 && output[0].Title == "Alice Resident is offline" && output[1].Title == "Alice Resident is online" &&
-                output.All(notice => notice.Category == NotificationCategory.Friends), "Presence transitions were duplicated or misclassified");
+            lock (dispatch) Check(output.Count == 2 && output[0].Message == "Alice Resident is offline" && output[1].Message == "Alice Resident is online" &&
+                output.All(notice => notice.Category == NotificationCategory.Friends && notice.Title == a.Name),
+                "Presence transitions were duplicated, misclassified, or not split into the account name and friend status");
         }
         finally { SetConnected(a, false); }
     }),
@@ -188,7 +189,7 @@ var tests = new (string Name, Func<Task> Run)[]
             null, new ScriptDialogEventArgs("Secret Region: Alice Resident", "Furniture", UUID.Zero, UUID.Random(), "Alice", "Resident",
                 9, new List<string> { "OK" }, resident)
         });
-        Check(output.Count == 2 && output[0].Title == "Resident" && output[1].Category == NotificationCategory.Menus &&
+        Check(output.Count == 2 && output[0].Title == "Resident" && output[1].Category == NotificationCategory.Menus && output[1].Title == "Furniture" &&
             output.All(notice => !notice.Message.Contains("Alice Resident") && !notice.Message.Contains("Secret Region") &&
                 !notice.Message.Contains("secondlife://")), "Notification content exposed RLV-hidden names or locations");
     }),

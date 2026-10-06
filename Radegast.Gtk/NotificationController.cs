@@ -25,9 +25,8 @@ internal sealed class NotificationController : IDisposable
     public void Notify(AccountSession account, AccountNotification notice, bool alreadyVisible)
     {
         if (_disposed || alreadyVisible || !_settings.Value.IsEnabled(notice.Category)) return;
-        var title = notice.Category == NotificationCategory.InstantMessages ? notice.Title : $"{account.Name} — {notice.Title}";
         _output.Show($"{account.Id}/{notice.Category}/{notice.TargetId}", account.Id, notice.Category,
-            PlainText(title, 160), notice.Message);
+            PlainText(notice.Title, 160), notice.Message);
     }
 
     public void Test()
