@@ -46,8 +46,8 @@ attempt; this version does not store credentials.
   notify without raising the viewer. Private IM popups show just the sender's
   name above the message preview. Group chats show just the group name above
   the message preview, and object chat/menus show just the object name above
-  the message. Friend status popups show the logged-in account name above
-  `Friend Name is online/offline`. Message previews use a single line shortened
+  the message. Friend status popups show just the friend's name above
+  `is online` or `is offline`. Message previews use a single line shortened
   with an ellipsis. They are measured with the system font, with a conservative
   width for Xfce popups;
   final popup sizing is controlled by the desktop notification theme.

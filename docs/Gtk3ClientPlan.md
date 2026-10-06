@@ -54,8 +54,8 @@ account and connection state.
 - There is no in-world sound, parcel stream, or voice UI. The client must not
   initialize the core FMOD sound engine. Notifications use silent desktop popups.
 - Optional desktop notifications show the IM sender, group name, or object
-  name above a message preview. Friend notifications show the receiving account
-  above the friend's online/offline status. Popups have no action buttons.
+  name above a message preview. Friend notifications show the friend's name
+  above `is online` or `is offline`. Popups have no action buttons.
 - Image and asset previews load only when their content is opened.
 
 ## Implementation boundaries
@@ -109,8 +109,8 @@ rules. A test button provides a manual desktop notification.
 The GTK main loop delivers silent libnotify popups without raising the viewer.
 Events already visible in the foreground stay quiet. IM, group, and object/menu
 notifications show only the sender, group, or object name above the message
-preview. Friend status notifications show the logged-in account name on the
-first line and `Friend Name is online/offline` on the second. Text is measured
+preview. Friend status notifications show only the friend's name on the
+first line and `is online` or `is offline` on the second. Text is measured
 with the system font and truncated at complete Unicode text elements, leaving
 room for the desktop theme's popup sizing. Popups have no action buttons and
 use `PawprintViewer.png`, which also provides the default GTK window icon and

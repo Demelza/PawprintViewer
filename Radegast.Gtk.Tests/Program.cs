@@ -166,9 +166,9 @@ var tests = new (string Name, Func<Task> Run)[]
                 { AgentBlock = new[] { new OfflineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
             await FriendsEvent(a, () => f.Receive(new OnlineNotificationPacket
                 { AgentBlock = new[] { new OnlineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
-            lock (dispatch) Check(output.Count == 2 && output[0].Message == "Alice Resident is offline" && output[1].Message == "Alice Resident is online" &&
-                output.All(notice => notice.Category == NotificationCategory.Friends && notice.Title == a.Name),
-                "Presence transitions were duplicated, misclassified, or not split into the account name and friend status");
+            lock (dispatch) Check(output.Count == 2 && output[0].Message == "is offline" && output[1].Message == "is online" &&
+                output.All(notice => notice.Category == NotificationCategory.Friends && notice.Title == "Alice Resident"),
+                "Presence transitions were duplicated, misclassified, or not split into the friend name and status");
         }
         finally { SetConnected(a, false); }
     }),
