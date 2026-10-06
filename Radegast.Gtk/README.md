@@ -37,7 +37,23 @@ attempt; this version does not store credentials.
   `/0 message` sends public chat. Channel commands respect RLV channel locks.
 - Account-specific logout and unread nearby-chat counts for background accounts.
 - Account tabs are ordered Nearby Chat, Friends, IMs, Group Chats, Inventory,
-  Attachments, Objects, Map, and Account Settings. Map is currently empty.
+  Attachments, Objects, Map, and Account Settings.
+- Map displays the grid's world tiles in a square occupying the full tab height.
+  It centers on the selected avatar whenever opened. Drag to pan and scroll to
+  zoom around the pointer. Green marks your avatar; gold marks the destination.
+  Region and destination controls are on the left. The window's minimum width
+  accommodates the square map and controls while retaining the 15% side panes.
+- Enter a region name and click the magnifier (or press Enter) to find that
+  region. X, Y and Z are **local coordinates within the entered region**, in
+  meters; X/Y are normally 0–255. **Teleport** resolves the region if necessary,
+  validates coordinates and waits for the server's confirmation. Failures appear
+  below the button. Opening the map again restores your current location.
+- Map images load only while that account's Map tab is displayed, with four
+  concurrent downloads and a small image cache. The service URL comes from the
+  grid's login response. Grids without a tile service can still use region
+  search and teleport. This is a 2D GTK/Cairo view, without a 3D renderer.
+  RLV world-map/location restrictions hide the map, and teleport, local-distance
+  and stand restrictions apply to the Teleport button and its requests.
 - **Global Settings**, below **+ Add account**, controls silent desktop popups
   for IMs, Group Chats, Worn Objects, Menus, and friends going online/offline.
   All five are enabled initially. Changes apply to every account and are saved

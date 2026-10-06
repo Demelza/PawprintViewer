@@ -29,7 +29,7 @@ account and connection state.
   location line below, and a balance line formatted like `69,420 L$`.
 - The central tab strip belongs to the selected account. Initial tabs are
   Nearby Chat, Friends, IMs, Group Chats, Inventory, Attachments, Objects, Map,
-  and Account Settings. Map is currently empty. Account Settings currently
+  and Account Settings. Account Settings currently
   contains only the existing RLV controls.
 - **Global Settings** is below the add-account button. Notification category
   switches there apply to every account and persist between runs.
@@ -50,7 +50,8 @@ account and connection state.
 
 ## Scope and resource use
 
-- There is no 3D scene, avatar renderer, map renderer, or GPU viewport.
+- There is no 3D scene, avatar renderer, or GPU viewport. The world map is a
+  2D GTK/Cairo drawing with tiles fetched only while its tab is displayed.
 - There is no in-world sound, parcel stream, or voice UI. The client must not
   initialize the core FMOD sound engine. Notifications use silent desktop popups.
 - Optional desktop notifications show the IM sender, group name, or object
@@ -76,6 +77,28 @@ account and connection state.
    in both GTK controls and outfit operations, including replacement of locked
    items. Load shared inventory only when queried, and advertise features that
    are unavailable in this client through the protocol blacklist.
+
+## Map checkpoint
+
+The Map tab has a square world map on the right, occupying the full tab height,
+with destination controls in the remaining space on the left. GTK's minimum
+width accommodates the map and controls without changing the 15% side panes.
+Opening the tab or selecting an account whose Map tab is open centers on that
+avatar. Dragging pans; wheel scrolling zooms around the pointer. A green marker
+tracks the avatar and a gold marker identifies the entered destination.
+
+Region search uses the simulator's map lookup and centers on the matched region.
+X/Y/Z occupy one row and are local coordinates in meters within that region.
+Teleport can resolve an entered region itself, validates coordinates, and reports
+server confirmation or failure. Each account owns its destination, view and tile
+cache. Downloads use the grid's login-advertised map service, have bounded
+concurrency, and cancel when the tab is hidden. Missing tiles render as ocean;
+lookup and teleport remain usable when a grid has no tile service.
+
+RLV `showworldmap` is now implemented rather than blacklisted. World-map and
+location restrictions conceal the map and its fields. `tploc`, `tplocal`, and
+seated `unsit` restrictions prevent forbidden manual teleports; pending requests
+also observe new restrictions and disconnects.
 
 ## RLV checkpoint
 

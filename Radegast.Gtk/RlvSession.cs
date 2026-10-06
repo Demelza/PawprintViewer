@@ -59,7 +59,7 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
             "setcam_fovmin", "setcam_fovmax", "camdistmax", "camdistmin", "camdrawalphamin",
             "camdrawalphamax", "setcam_avdistmax", "setcam_avdistmin", "camdrawcolor", "camunlock",
             "setcam_unlock", "camavdist", "camtextures", "setcam_textures", "setenv", "getenv",
-            "setdebug", "getdebug", "showworldmap", "showminimap", "shownametags",
+            "setdebug", "getdebug", "showminimap", "shownametags",
             "showhovertext", "showhovertextall", "showhovertexthud", "showhovertextworld",
             "edit", "editobj", "editworld", "editattach", "rez", "viewnote", "viewscript", "viewtexture",
             "share", "share_sec", "accepttprequest", "tprequest", "tprequest_sec"

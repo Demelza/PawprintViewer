@@ -239,6 +239,7 @@ internal sealed partial class AccountSession : IDisposable
     {
         if ((success || reason == "mfa_challenge") && reply != null)
             Net.LoginOptions.MfaHash = reply.MfaHash;
+        if (success && reply != null) MapTileServer = WorldMapTileSource.ServerUri(reply.MapServerUrl);
     }
 
     private void OnMoneyBalanceUpdated(object? sender, BalanceEventArgs e)

@@ -14,6 +14,7 @@ internal sealed class SessionWidgets : IDisposable
     private readonly AttachmentsPanel _attachmentsPanel;
     private readonly FriendsPanel _friendsPanel;
     private readonly ObjectsPanel _objectsPanel;
+    private readonly MapPanel _mapPanel;
     private readonly InstantMessagesPanel _imPanel;
     private readonly Label _imTabLabel = new("IMs");
     private readonly GroupChatsPanel _groupPanel;
@@ -107,7 +108,8 @@ internal sealed class SessionWidgets : IDisposable
         Tabs.AppendPage(_attachmentsPanel, new Label("Attachments"));
         _objectsPanel = new ObjectsPanel(session);
         Tabs.AppendPage(_objectsPanel, new Label("Objects"));
-        Tabs.AppendPage(new Box(Orientation.Vertical, 0), new Label("Map"));
+        _mapPanel = new MapPanel(session);
+        Tabs.AppendPage(_mapPanel, new Label("Map"));
         _rlvPanel = new RlvPanel(session.Rlv);
         Tabs.AppendPage(_rlvPanel, new Label("Account Settings"));
         session.Rlv.Changed += UpdateRestrictions;
@@ -121,6 +123,7 @@ internal sealed class SessionWidgets : IDisposable
             _imPanel.SetDisplayed(_selectedAccount && args.PageNum == Tabs.PageNum(_imPanel));
             _groupPanel.SetDisplayed(_selectedAccount && args.PageNum == Tabs.PageNum(_groupPanel));
             _objectsPanel.SetDisplayed(_selectedAccount && args.PageNum == Tabs.PageNum(_objectsPanel));
+            _mapPanel.SetDisplayed(_selectedAccount && args.PageNum == Tabs.PageNum(_mapPanel));
             GtkDispatch.Post(() =>
             {
                 if (_disposed) return;
@@ -139,6 +142,7 @@ internal sealed class SessionWidgets : IDisposable
         _imPanel.SetDisplayed(selected && IsCurrentPage(_imPanel));
         _groupPanel.SetDisplayed(selected && IsCurrentPage(_groupPanel));
         _objectsPanel.SetDisplayed(selected && IsCurrentPage(_objectsPanel));
+        _mapPanel.SetDisplayed(selected && IsCurrentPage(_mapPanel));
     }
 
     private bool IsCurrentPage(Widget page) => Tabs.CurrentPage == Tabs.PageNum(page);
@@ -278,5 +282,6 @@ internal sealed class SessionWidgets : IDisposable
         _attachmentsPanel.Stop();
         _friendsPanel.Stop();
         _objectsPanel.Stop();
+        _mapPanel.Stop();
     }
 }

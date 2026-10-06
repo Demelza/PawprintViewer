@@ -13,6 +13,11 @@ using Radegast.Gtk;
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("World map stays north-up, pans with the pointer and zooms around the cursor with aligned tiles", MapChecks.Viewport),
+    ("World map searches exact region names, keeps accounts separate and cancels pending lookups", MapChecks.RegionLookup),
+    ("World map and teleports enforce RLV locks, connectivity and coordinate bounds", MapChecks.Permissions),
+    ("Map teleport uses the selected account and destination and waits for server confirmation", MapChecks.Teleport),
+    ("Map tiles use each grid's advertised service and zoom filenames", MapChecks.TileServer),
     ("Global notification settings persist, retain defaults for new fields and recover from bad files", () =>
     {
         var directory = Path.Combine(Path.GetTempPath(), "pawprint-settings-" + Guid.NewGuid().ToString("N"));
