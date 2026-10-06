@@ -87,7 +87,7 @@ internal sealed partial class AccountSession
             if (_disposed || (Rlv.Enabled && !Rlv.Service.Permissions.CanReceiveIM(message.Message, message.FromAgentID.Guid))) return;
             if (FindGroupSession(message.IMSessionID) is { } group && _groups.ContainsKey(group.Id)) return;
             if (!string.IsNullOrWhiteSpace(message.FromAgentName))
-                lock (_nameLock) _names[message.FromAgentID] = message.FromAgentName;
+                RememberAvatarName(message.FromAgentID, message.FromAgentName);
             var conversation = GetConversation(message.FromAgentID);
             conversation.Append(new ChatMessage(ChatConversation.MessageTime(message.Timestamp), message.Message, false));
             conversation.UnreadCount++;

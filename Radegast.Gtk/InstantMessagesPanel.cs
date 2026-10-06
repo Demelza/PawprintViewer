@@ -15,7 +15,7 @@ internal class ChatConversationsPanel : Box
     private readonly Dictionary<UUID, Button> _buttons = new();
     private readonly Stack _pages = new();
     private readonly Label _heading = new() { Xalign = 0, Ellipsize = Pango.EllipsizeMode.End };
-    private readonly TextView _history = new() { Editable = false, CursorVisible = false, WrapMode = WrapMode.WordChar };
+    private readonly ChatHistoryView _history;
     private readonly ScrolledWindow _historyScroll = new();
     private readonly Entry _input = new() { PlaceholderText = "Write an instant message…" };
     private readonly Button _send = new("Send");
@@ -32,6 +32,7 @@ internal class ChatConversationsPanel : Box
     protected ChatConversationsPanel(AccountSession session, bool groupChats) : base(Orientation.Horizontal, 0)
     {
         _session = session;
+        _history = new ChatHistoryView(session);
         _groupChats = groupChats;
         var grid = new global::Gtk.Grid { ColumnHomogeneous = true, Hexpand = true, Vexpand = true };
         PackStart(grid, true, true, 0);
@@ -208,7 +209,7 @@ internal class ChatConversationsPanel : Box
         var switched = _rendered != _selected;
         var atBottom = adjustment.Value + adjustment.PageSize >= adjustment.Upper - 24;
         var rebuild = switched || force || name != _renderedName;
-        if (rebuild) { _history.Buffer.Text = string.Empty; _renderedCount = 0; }
+        if (rebuild) { _history.Clear(); _renderedCount = 0; }
         var appended = _selected.Messages.Count > _renderedCount;
         var outgoing = !rebuild && appended && _selected.Messages[^1].Outgoing;
         for (; _renderedCount < _selected.Messages.Count; _renderedCount++)
@@ -218,8 +219,7 @@ internal class ChatConversationsPanel : Box
             var time = message.Timestamp.Date == DateTime.Today ? message.Timestamp.ToString("HH:mm") : message.Timestamp.ToString("yyyy-MM-dd HH:mm");
             var text = message.Text.StartsWith("/me ", StringComparison.OrdinalIgnoreCase)
                 ? $"[{time}] {from} {message.Text[4..]}" : $"[{time}] {from}: {message.Text}";
-            var end = _history.Buffer.EndIter;
-            _history.Buffer.Insert(ref end, _session.RedactText(text) + Environment.NewLine);
+            _history.AppendLine(text);
         }
         _rendered = _selected;
         _renderedName = name;
@@ -284,6 +284,7 @@ internal class ChatConversationsPanel : Box
     {
         if (_disposed) return;
         _disposed = true;
+        _history.Stop();
         _session.ConversationChanged -= OnPrivateConversationChanged;
         _session.GroupConversationChanged -= OnGroupConversationChanged;
         _session.GroupsChanged -= OnGroupsChanged;

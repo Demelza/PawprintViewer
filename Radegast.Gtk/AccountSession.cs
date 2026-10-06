@@ -287,7 +287,7 @@ internal sealed partial class AccountSession : IDisposable
             if (Rlv.Enabled && e.SourceType == ChatSourceType.Agent && e.SourceID != Client.Self.AgentID &&
                 !permissions.CanShowNames(e.SourceID.Guid)) from = "Resident";
             if (e.SourceType == ChatSourceType.Agent && !string.IsNullOrWhiteSpace(e.FromName))
-                lock (_nameLock) _names[e.SourceID] = e.FromName;
+                RememberAvatarName(e.SourceID, e.FromName);
             ChatLine?.Invoke(this, RedactText($"[{DateTime.Now:HH:mm}] {from}: {e.Message}"));
             if (IsWornObjectMessage(e)) Notify(NotificationCategory.WornObjects, from, e.Message, e.SourceID);
         });
@@ -297,13 +297,14 @@ internal sealed partial class AccountSession : IDisposable
     {
         if (!Rlv.Enabled) return text;
         var permissions = Rlv.Service.Permissions;
+        text = AvatarProfileLinks.HideNames(text, CanShowAvatarName);
         lock (_nameLock)
             foreach (var (id, name) in _names)
                 if (id != Client.Self.AgentID && !string.IsNullOrWhiteSpace(name) && !permissions.CanShowNames(id.Guid))
                     text = text.Replace(name, "Resident", StringComparison.OrdinalIgnoreCase);
         if (!permissions.CanShowLoc())
         {
-            text = Regex.Replace(text, @"(?:secondlife://|https?://maps\.secondlife\.com/secondlife/)[^\s]+", "[location hidden]", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"(?:secondlife://(?!/?app/agent/)|https?://maps\.secondlife\.com/secondlife/)[^\s]+", "[location hidden]", RegexOptions.IgnoreCase);
             var region = Client.Network.CurrentSim?.Name;
             if (!string.IsNullOrEmpty(region)) text = text.Replace(region, "[region hidden]", StringComparison.OrdinalIgnoreCase);
         }
@@ -364,7 +365,11 @@ internal sealed partial class AccountSession : IDisposable
             {
                 foreach (var (id, name) in resolved)
                 {
-                    _names[id] = name;
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        _names[id] = name;
+                        _requestedNames.Remove(id);
+                    }
                     _requestedFriendNames.Remove(id);
                 }
                 _nearby = _nearby.Select(person =>
@@ -372,6 +377,7 @@ internal sealed partial class AccountSession : IDisposable
                         ? person with { Name = name } : person).ToList();
             }
             NearbyChanged?.Invoke(this);
+            AvatarNamesChanged?.Invoke(this);
             if (resolved.Any(name => Client.Friends.FriendList.ContainsKey(name.Key))) FriendsChanged?.Invoke(this);
             foreach (var (id, _) in resolved)
                 if (_conversations.TryGetValue(id, out var conversation)) ConversationChanged?.Invoke(this, conversation);

@@ -12,10 +12,14 @@ using Radegast.Gtk;
 
 if (args.Contains("--map-scroll-smoke", StringComparer.Ordinal)) return NativeMapChecks.RunScroll();
 if (args.Contains("--login-smoke", StringComparer.Ordinal)) return NativeLoginChecks.Run();
+if (args.Contains("--chat-links-smoke", StringComparer.Ordinal)) return NativeChatLinkChecks.Run();
 
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Chat profile links retain punctuation and Unicode and ignore unrelated or malformed URLs", ChatLinkChecks.Parsing),
+    ("Chat profile links resolve names once per account and refresh on server name replies", ChatLinkChecks.Names),
+    ("Chat profile links open the referenced avatar and enforce name/location restrictions", ChatLinkChecks.Restrictions),
     ("Remembered logins persist and update without plaintext passwords, duplicate aliases or shared grid credentials", SavedLoginChecks.Persistence),
     ("Remembered logins handle unavailable keyrings, corrupt records and cancelled saves", SavedLoginChecks.Failures),
     ("Teleport offers open once for the correct account and notify with the sender and offer label", TeleportOfferChecks.Incoming),

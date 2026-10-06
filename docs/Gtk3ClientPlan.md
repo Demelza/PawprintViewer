@@ -240,6 +240,24 @@ replies in that account's Nearby Chat. Closing a payment window or logging out
 does not send money. Offer TP uses the originating account's current location
 and respects RLV location restrictions and the friend's granted map rights.
 
+## Chat profile links checkpoint
+
+Nearby Chat, IMs and Group Chats share a GTK transcript renderer. Agent profile
+SLURLs display an underlined resident name with the theme's link color. Missing
+names are requested once per account and update existing transcript text when
+the server replies; timestamps, punctuation, drafts and unread counts are kept.
+Other URLs and malformed profile links retain their original text. The message
+sent to the grid retains its original contents.
+
+Clicking a name opens a read-only GTK profile window for that resident and
+originating account, containing Second Life/First Life text and birth date.
+Profile retrieval uses UDP with the AgentProfile capability when available.
+The first successful reply supplies the fields. Dismissal/logout cancels pending
+requests and ignores late replies. These windows use the existing presentation
+policy so they do not bring a background viewer to the foreground. Hidden names
+become non-clickable `Resident` text; a name lock closes an open profile. Location
+hiding continues to redact location links without concealing profile links.
+
 ## Private IM checkpoint
 
 The IMs tab has a vertical list of conversation buttons on the left, with the

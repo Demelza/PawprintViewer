@@ -122,6 +122,11 @@ and a password-save failure is reported in that account's Nearby Chat.
 - IMs request offline delivery and retrieve stored offline messages after login.
   Private messages keep channel prefixes such as `/9` as literal text; channel
   commands belong in Nearby Chat.
+- Avatar profile URLs such as `secondlife:///app/agent/<uuid>/about` appear as
+  clickable resident names in Nearby Chat, IMs and Group Chats. Unknown names
+  load automatically for the originating account and update existing messages.
+  Clicking opens a GTK profile window with Second Life/First Life text, birth
+  date and **Dismiss**. Names and profile access respect RLV name restrictions.
 - Group Chats uses the same full-height layout as IMs. Existing group memberships
   appear alphabetically on the left; select a group to join its chat, then use
   **Send** or Enter. **Refresh groups** reloads memberships. Incoming group
@@ -256,6 +261,14 @@ It uses temporary account metadata and a fake keyring; no grid login is needed:
 
 ```sh
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --login-smoke
+```
+
+The native chat-link check tests name resolution in all three chat tabs, clicks
+through GTK events, profile replies, text selection and window cleanup. It uses
+simulated packets and does not connect to a grid:
+
+```sh
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --chat-links-smoke
 ```
 
 For a live check, use an RLV attachment to test detection, lock/unlock and

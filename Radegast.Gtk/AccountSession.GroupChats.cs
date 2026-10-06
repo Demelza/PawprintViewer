@@ -234,7 +234,7 @@ internal sealed partial class AccountSession
             }
         }
         else if (!string.IsNullOrWhiteSpace(message.FromAgentName))
-            lock (_nameLock) _names[message.FromAgentID] = message.FromAgentName;
+            RememberAvatarName(message.FromAgentID, message.FromAgentName);
         chat.Append(new ChatMessage(ChatConversation.MessageTime(message.Timestamp), message.Message, own,
             message.FromAgentID, message.FromAgentName));
         if (!own) chat.UnreadCount++;

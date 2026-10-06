@@ -7,7 +7,7 @@ namespace Radegast.Gtk;
 internal sealed class SessionWidgets : IDisposable
 {
     private readonly AccountSession _session;
-    private readonly TextBuffer _chatBuffer;
+    private readonly ChatHistoryView _chatHistory;
     private readonly Entry _chatInput;
     private readonly ListBox _nearbyList;
     private readonly InventoryPanel _inventoryPanel;
@@ -73,14 +73,8 @@ internal sealed class SessionWidgets : IDisposable
         var chatPage = new Box(Orientation.Vertical, 6) { BorderWidth = 8 };
         var chatScroll = new ScrolledWindow();
         chatScroll.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
-        var chatView = new TextView
-        {
-            Editable = false,
-            CursorVisible = false,
-            WrapMode = WrapMode.WordChar
-        };
-        _chatBuffer = chatView.Buffer;
-        chatScroll.Add(chatView);
+        _chatHistory = new ChatHistoryView(session);
+        chatScroll.Add(_chatHistory);
         chatPage.PackStart(chatScroll, true, true, 0);
 
         var compose = new Box(Orientation.Horizontal, 6);
@@ -184,8 +178,7 @@ internal sealed class SessionWidgets : IDisposable
 
     public void AppendChat(string line)
     {
-        var end = _chatBuffer.EndIter;
-        _chatBuffer.Insert(ref end, line + Environment.NewLine);
+        _chatHistory.AppendLine(line);
     }
 
     public void RefreshNearby()
@@ -263,14 +256,13 @@ internal sealed class SessionWidgets : IDisposable
             ? "restricted" : "inventory";
         UpdateLocation();
         RefreshNearby();
-        var redacted = _session.RedactText(_chatBuffer.Text);
-        if (redacted != _chatBuffer.Text) _chatBuffer.Text = redacted;
         if (IsCurrentPage(_inventoryPages) && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
     }
 
     public void Dispose()
     {
         _disposed = true;
+        _chatHistory.Stop();
         _session.Rlv.Changed -= UpdateRestrictions;
         _session.ConversationChanged -= OnConversationChanged;
         _session.GroupConversationChanged -= OnGroupConversationChanged;

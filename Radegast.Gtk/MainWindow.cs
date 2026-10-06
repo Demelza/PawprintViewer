@@ -12,6 +12,7 @@ internal sealed class MainWindow : Window
     private readonly Dictionary<AccountSession, HashSet<ScriptDialogWindow>> _scriptDialogs = new();
     private readonly Dictionary<AccountSession, HashSet<ScriptPermissionWindow>> _permissionDialogs = new();
     private readonly Dictionary<AccountSession, HashSet<TeleportOfferWindow>> _teleportDialogs = new();
+    private readonly Dictionary<AccountSession, Dictionary<UUID, AvatarProfileWindow>> _profiles = new();
     private readonly ChildWindowPresenter _childWindows;
     private readonly GlobalSettings _globalSettings;
     private readonly NotificationController _notifications;
@@ -114,6 +115,7 @@ internal sealed class MainWindow : Window
         session.PermissionRequested += OnPermissionRequested;
         session.TeleportOfferReceived += OnTeleportOfferReceived;
         session.NotificationReceived += OnNotification;
+        session.AvatarProfileRequested += OnAvatarProfileRequested;
         widgets.AccountRow.ShowAll();
         widgets.Root.ShowAll();
         widgets.NearbyPane.ShowAll();
@@ -147,6 +149,7 @@ internal sealed class MainWindow : Window
         session.PermissionRequested -= OnPermissionRequested;
         session.TeleportOfferReceived -= OnTeleportOfferReceived;
         session.NotificationReceived -= OnNotification;
+        session.AvatarProfileRequested -= OnAvatarProfileRequested;
         _notifications.CloseAccount(session.Id);
         if (_scriptDialogs.Remove(session, out var dialogs))
             foreach (var dialog in dialogs.ToArray()) dialog.CloseMenu();
@@ -154,6 +157,8 @@ internal sealed class MainWindow : Window
             foreach (var dialog in permissions.ToArray()) dialog.ClosePrompt();
         if (_teleportDialogs.Remove(session, out var offers))
             foreach (var dialog in offers.ToArray()) dialog.ClosePrompt();
+        if (_profiles.Remove(session, out var profiles))
+            foreach (var profile in profiles.Values.ToArray()) profile.CloseProfile();
         widgets.Dispose();
         _accountRows.Remove(widgets.AccountRow);
         _pages.Remove(widgets.Root);
@@ -245,5 +250,18 @@ internal sealed class MainWindow : Window
         dialogs.Add(dialog);
         dialog.Destroyed += (_, _) => dialogs.Remove(dialog);
         ShowChildWindow(dialog);
+    }
+
+    private void OnAvatarProfileRequested(AccountSession session, UUID avatar)
+    {
+        if (!_sessions.ContainsKey(session) || !session.CanViewAvatarProfile(avatar)) return;
+        if (!_profiles.TryGetValue(session, out var profiles)) _profiles[session] = profiles = new();
+        if (!profiles.TryGetValue(avatar, out var profile))
+        {
+            profile = new AvatarProfileWindow(this, session, avatar);
+            profiles.Add(avatar, profile);
+            profile.Destroyed += (_, _) => profiles.Remove(avatar);
+        }
+        ShowChildWindow(profile);
     }
 }
