@@ -78,6 +78,25 @@ account and connection state.
    items. Load shared inventory only when queried, and advertise features that
    are unavailable in this client through the protocol blacklist.
 
+## Remembered logins checkpoint
+
+The add-account name field is an editable dropdown of successful previous
+logins for the selected grid. Selecting a name retrieves its password from the
+desktop Secret Service keyring with libsecret; typing a different account or
+changing grids clears the previous password. Grid endpoints and normalized
+login names identify credentials, so `name`, `Name Resident`, and `name.Resident`
+share one saved login on the same grid while other grids stay separate.
+Password lookups run outside the GTK thread, and stale lookups cannot overwrite
+later selections or passwords entered manually.
+
+Only successful logins save or update credentials. Failed attempts and MFA
+challenges do not save them, and MFA codes are not remembered. The settings
+directory contains a names/grid-URI list with permissions limited to the user;
+passwords only go to the keyring. Saving runs independently of connecting the
+account. Keyring failures preserve manual login and report password-save errors
+in Nearby Chat. Existing account lists survive restarts, and malformed metadata
+does not prevent entering a new account manually.
+
 ## Map checkpoint
 
 The Map tab has a square world map on the right, occupying the full tab height,

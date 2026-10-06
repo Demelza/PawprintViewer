@@ -15,6 +15,8 @@ if (args.Contains("--map-scroll-smoke", StringComparer.Ordinal)) return NativeMa
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Remembered logins persist and update without plaintext passwords, duplicate aliases or shared grid credentials", SavedLoginChecks.Persistence),
+    ("Remembered logins handle unavailable keyrings, corrupt records and cancelled saves", SavedLoginChecks.Failures),
     ("Teleport offers open once for the correct account and notify with the sender and offer label", TeleportOfferChecks.Incoming),
     ("Teleport offer acceptance uses the original lure and refusal reaches the sender exactly once", TeleportOfferChecks.Responses),
     ("Teleport offers recheck RLV restrictions and seated locks before acceptance", TeleportOfferChecks.Restrictions),

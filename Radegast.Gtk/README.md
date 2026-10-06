@@ -17,8 +17,20 @@ dotnet run --project Radegast.Gtk/Radegast.Gtk.csproj
 
 The add-account window supports Second Life and the grids listed in the
 repository's `grids.xml`, plus a custom login URI. An MFA challenge can be
-answered in the same window. Passwords are held only for the active login
-attempt; this version does not store credentials.
+answered in the same window. The account field is an editable dropdown: select
+a remembered account to fill its password, or type a new name manually.
+Successful logins remember names and update saved passwords automatically.
+The list is specific to the selected grid, including custom login URIs.
+
+Passwords use the Linux desktop Secret Service keyring through `libsecret`.
+Install the `libsecret` runtime and run a Secret Service provider such as GNOME
+Keyring in your desktop session. The keyring may ask you to unlock it.
+Account names and grid URIs are kept in
+`$XDG_CONFIG_HOME/pawprint-viewer/accounts.json` (normally
+`~/.config/pawprint-viewer/accounts.json`); passwords and MFA codes are never
+written to that file. MFA codes must still be entered for each challenge.
+If the keyring is unavailable, manual login still works. The name is remembered
+and a password-save failure is reported in that account's Nearby Chat.
 
 ## Implemented in this checkpoint
 

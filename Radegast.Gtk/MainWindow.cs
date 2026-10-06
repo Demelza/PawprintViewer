@@ -80,6 +80,7 @@ internal sealed class MainWindow : Window
 
         _loginWindow = new LoginWindow(this);
         _loginWindow.LoginSucceeded += AddSession;
+        _loginWindow.CredentialsWarning += OnChatLine;
         _loginWindow.Destroyed += (_, _) => _loginWindow = null;
         ShowChildWindow(_loginWindow, showContents: false);
     }
