@@ -177,7 +177,9 @@ internal sealed partial class AccountSession : IDisposable
             e.Channel, e.ButtonLabels.ToArray()) { OwnerId = e.OwnerID };
         _post(() =>
         {
-            if (!_disposed) ScriptDialogReceived?.Invoke(this, menu);
+            if (_disposed) return;
+            ScriptDialogReceived?.Invoke(this, menu);
+            Notify(NotificationCategory.Menus, $"Menu from {menu.ObjectName}", menu.Message, menu.ObjectId);
         });
     }
 
@@ -264,6 +266,8 @@ internal sealed partial class AccountSession : IDisposable
         if (enabled) Rlv.SetEnabled(true);
         _nearby.Clear();
         ResetGroupChats();
+        _friendPresence.Clear();
+        _friendPresenceReady = false;
         lock (_nameLock) _requestedFriendNames.Clear();
         StateChanged?.Invoke(this);
         NearbyChanged?.Invoke(this);
@@ -286,6 +290,7 @@ internal sealed partial class AccountSession : IDisposable
             if (e.SourceType == ChatSourceType.Agent && !string.IsNullOrWhiteSpace(e.FromName))
                 lock (_nameLock) _names[e.SourceID] = e.FromName;
             ChatLine?.Invoke(this, RedactText($"[{DateTime.Now:HH:mm}] {from}: {e.Message}"));
+            if (IsWornObjectMessage(e)) Notify(NotificationCategory.WornObjects, $"Worn object: {from}", e.Message, e.SourceID);
         });
     }
 

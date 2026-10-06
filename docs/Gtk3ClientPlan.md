@@ -28,7 +28,11 @@ account and connection state.
   account has its name and square logout button on one line, a full-width
   location line below, and a balance line formatted like `69,420 L$`.
 - The central tab strip belongs to the selected account. Initial tabs are
-  Nearby Chat, IMs, Group Chats, Inventory, Attachments, Friends, Objects, and RLV.
+  Nearby Chat, IMs, Group Chats, Inventory, Attachments, Friends, Objects, and
+  Account Settings. Account Settings currently contains only the existing RLV
+  controls.
+- **Global Settings** is below the add-account button. Notification category
+  switches there apply to every account and persist between runs.
 - The right pane always shows nearby avatars for the selected account, ordered
   by distance. It updates after movement, teleport, or account selection.
 - The account rail and nearby pane each use 15% of the window width, with 70%
@@ -48,8 +52,7 @@ account and connection state.
 
 - There is no 3D scene, avatar renderer, map renderer, or GPU viewport.
 - There is no in-world sound, parcel stream, or voice UI. The client must not
-  initialize the core FMOD sound engine. Notification sounds are a separate,
-  optional desktop UI feature.
+  initialize the core FMOD sound engine. Notifications use silent desktop popups.
 - Optional desktop notifications identify the receiving account. Their click
   action selects that account and the relevant conversation or notice.
 - Image and asset previews load only when their content is opened.
@@ -66,7 +69,7 @@ account and connection state.
    retain the state needed to restore their tabs and conversations.
 4. Implement login and nearby chat first, then concurrent logins and the
    account rail, then IM/group chat, inventory, attachments, and friends.
-5. Add notification sounds and desktop notifications after the event routing
+5. Add desktop notifications after the event routing
    works for both selected and background accounts.
 6. Give each account a separate RLV/RLVa engine and command queue. Enforce rules
    in both GTK controls and outfit operations, including replacement of locked
@@ -75,7 +78,8 @@ account and connection state.
 
 ## RLV checkpoint
 
-The RLV tab shows each account's active restrictions and enable switch.
+The Account Settings tab shows each account's active RLV restrictions and enable
+switch.
 Inventory, attachment touch, nearby chat, private/group conversations, and
 displayed names/location now use that account's permissions. The shared command
 engine handles inventory queries
@@ -91,6 +95,22 @@ other shared folders. Diagnostics show commands, the shared root, and channel
 replies. See the
 [GTK README](../Radegast.Gtk/README.md#rlv--rlva) for supported features,
 limitations, and the regression-check command.
+
+## Notifications checkpoint
+
+Global Settings has switches for incoming private IMs, group chats, private
+owner-say/directed chat from worn objects, object menus/text prompts, and friend
+online/offline transitions. Preferences use the XDG configuration directory and
+apply immediately. Initial friend presence, outgoing chat, typing, group echoes,
+and RLV commands are excluded. Message content follows RLV receive and display
+rules. A test button provides a manual desktop notification.
+
+The GTK main loop delivers silent libnotify popups without raising the viewer.
+Events already visible in the foreground stay quiet. Notifications identify the
+account; clicking one selects that account and its conversation, chat tab, or
+existing menu. Each conversation replaces its previous popup, and the number of
+open popups is bounded. Disabling a category, disconnecting, or logging out closes
+the affected popups and removes stale activation callbacks.
 
 ## Objects checkpoint
 

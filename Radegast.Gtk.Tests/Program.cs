@@ -13,6 +13,167 @@ using Radegast.Gtk;
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Global notification settings persist, retain defaults for new fields and recover from bad files", () =>
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "pawprint-settings-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "settings.json");
+        try
+        {
+            var settings = new GlobalSettings(path);
+            Check(Enum.GetValues<NotificationCategory>().All(settings.Value.IsEnabled), "Missing settings did not use defaults");
+            settings.Update(new NotificationSettings { InstantMessages = false, WornObjects = false, Friends = false });
+            var restored = new GlobalSettings(path);
+            Check(restored.Value == settings.Value && restored.LoadError == null, "Notification switches did not survive reopening");
+            File.WriteAllText(path, "{\"Menus\":false,\"FutureSetting\":42}");
+            var partial = new GlobalSettings(path);
+            Check(!partial.Value.Menus && partial.Value.InstantMessages && partial.Value.Friends,
+                "An older settings file disabled categories it did not contain");
+            File.WriteAllText(path, "broken json");
+            var broken = new GlobalSettings(path);
+            Check(broken.LoadError != null && broken.Value == new NotificationSettings(), "A corrupt settings file was not handled");
+            var blocked = new GlobalSettings(Path.Combine(directory, "blocked"));
+            Directory.CreateDirectory(blocked.FilePath);
+            var applied = false;
+            blocked.Changed += () => applied = true;
+            try { blocked.Update(blocked.Value with { Friends = false }); }
+            catch (IOException) { }
+            Check(applied && !blocked.Value.Friends && !Directory.EnumerateFiles(directory, "*.tmp").Any(),
+                "A failed save did not apply the setting for this session or left a temporary file");
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+        return Task.CompletedTask;
+    }),
+    ("Notification switches apply to every account, suppress visible events and escape desktop markup", () =>
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "pawprint-notification-policy-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var settings = new GlobalSettings(Path.Combine(directory, "settings.json"));
+            var output = new RecordingNotificationOutput();
+            using var controller = new NotificationController(settings, output);
+            using var a = new AccountSession(action => action());
+            using var b = new AccountSession(action => action());
+            foreach (var category in Enum.GetValues<NotificationCategory>())
+            {
+                var notice = new AccountNotification(category, "Event", "<b>x & y</b>", UUID.Random());
+                controller.Notify(a, notice, false, () => { });
+                controller.Notify(b, notice, false, () => { });
+                controller.Notify(a, notice, true, () => { });
+            }
+            Check(output.Shown.Count == 10 && output.Shown.All(notice => notice.Body == "&lt;b&gt;x &amp; y&lt;/b&gt;"),
+                "Visible events were notified or desktop markup was not escaped");
+            Check(output.Shown.Select(notice => notice.AccountId).Distinct().Count() == 2 &&
+                output.Shown.Select(notice => notice.Key).Distinct().Count() == 10, "Accounts shared notification identities");
+            foreach (var category in Enum.GetValues<NotificationCategory>()) settings.Update(settings.Value.WithCategory(category, false));
+            foreach (var category in Enum.GetValues<NotificationCategory>())
+                controller.Notify(a, new(category, "Disabled", "Message", UUID.Random()), false, () => { });
+            Check(output.Shown.Count == 10 && Enum.GetValues<NotificationCategory>().All(category =>
+                output.Cleared.Any(clear => clear.Category == category)), "Disabled categories still notified or old popups were retained");
+            controller.CloseAccount(a.Id);
+            Check(output.Cleared.Last().AccountId == a.Id, "Logout did not clear only that account's notifications");
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+        return Task.CompletedTask;
+    }),
+    ("Incoming notifications classify private IMs and group chats without outgoing messages or echoes", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var output = new List<AccountNotification>();
+        a.NotificationReceived += (_, notice) => output.Add(notice);
+        f.CapturePackets();
+        SetConnected(a, true);
+        try
+        {
+            var resident = UUID.Random();
+            var group = UUID.Random();
+            f.Groups((group, "Test Group"));
+            await ReceiveIm(f, f.PrivateIm(resident, "Alice Resident", "private"));
+            a.SendInstantMessage(resident, "outgoing");
+            a.MarkConversationRead(resident);
+            await ReceiveIm(f, f.GroupIm(group, resident, "Alice Resident", "group"));
+            await ReceiveIm(f, f.GroupIm(group, f.Owner, "Me Resident", "own group"));
+            await ReceiveIm(f, f.PrivateIm(resident, "Alice Resident", "typing", InstantMessageDialog.StartTyping));
+            Check(output.Count == 2 && output[0].Category == NotificationCategory.InstantMessages && output[0].TargetId == resident &&
+                output[1].Category == NotificationCategory.GroupChats && output[1].TargetId == group && output[1].Message == "Alice Resident: group",
+                "Notifications used transcript changes rather than incoming message events");
+            await f.Command("@recvim=n");
+            await ReceiveIm(f, f.PrivateIm(resident, "Alice Resident", "blocked"));
+            Check(output.Count == 2, "A message blocked by RLV produced a notification");
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Worn object notifications accept private chat from linked attachments and exclude rezzed objects and commands", () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        a.Rlv.SetEnabled(false);
+        var output = new List<AccountNotification>();
+        a.NotificationReceived += (_, notice) => output.Add(notice);
+        var child = f.Prim(201, f.Attachment.LocalID);
+        var rezzed = f.Prim(202);
+        Chat(f.Attachment.ID, ChatType.OwnerSay, f.Owner, "attachment");
+        Chat(child.ID, ChatType.RegionSayTo, f.Owner, "linked attachment");
+        Chat(rezzed.ID, ChatType.OwnerSay, f.Owner, "rezzed object");
+        Chat(child.ID, ChatType.Normal, f.Owner, "public object chat");
+        Chat(child.ID, ChatType.OwnerSay, UUID.Random(), "another owner's object");
+        Chat(child.ID, ChatType.OwnerSay, f.Owner, "@detach=n");
+        Check(output.Count == 2 && output.All(notice => notice.Category == NotificationCategory.WornObjects) &&
+            output[1].Message == "linked attachment", "Worn/private object chat classification was incorrect");
+        return Task.CompletedTask;
+
+        void Chat(UUID id, ChatType type, UUID owner, string message) =>
+            typeof(AccountSession).GetMethod("OnChatReceived", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(a,
+                new object?[] { null, new ChatEventArgs(f.Simulator, message, ChatAudibleLevel.Fully, type,
+                    ChatSourceType.Object, "Test object", id, owner, Vector3.Zero) });
+    }),
+    ("Friend notifications report changes once after the initial roster, without rights updates", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var friend = f.Friend("Alice Resident");
+        var output = new List<AccountNotification>();
+        a.NotificationReceived += (_, notice) => output.Add(notice);
+        SetConnected(a, true);
+        try
+        {
+            await FriendsEvent(a, () => f.Receive(new OnlineNotificationPacket
+                { AgentBlock = new[] { new OnlineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
+            Check(output.Count == 0, "Initial online statuses produced notifications");
+            typeof(FriendsManager).GetMethod("OnFriendsListReady", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(a.Client.Friends, new object[] { new FriendsReadyEventArgs(1) });
+            await FriendsEvent(a, () => f.Receive(new OfflineNotificationPacket
+                { AgentBlock = new[] { new OfflineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
+            await FriendsEvent(a, () => f.Receive(new OfflineNotificationPacket
+                { AgentBlock = new[] { new OfflineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
+            await FriendsEvent(a, () => f.Receive(new OnlineNotificationPacket
+                { AgentBlock = new[] { new OnlineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
+            Check(output.Count == 2 && output[0].Title == "Alice Resident is offline" && output[1].Title == "Alice Resident is online" &&
+                output.All(notice => notice.Category == NotificationCategory.Friends), "Presence transitions were duplicated or misclassified");
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Menu and IM notification content follows RLV name and location redaction", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        f.Simulator.Name = "Secret Region";
+        var output = new List<AccountNotification>();
+        a.NotificationReceived += (_, notice) => output.Add(notice);
+        var resident = UUID.Random();
+        await ReceiveIm(f, f.PrivateIm(resident, "Alice Resident", "initial"));
+        output.Clear();
+        await f.Command("@shownames=n,showloc=n");
+        await ReceiveIm(f, f.PrivateIm(resident, "Alice Resident", "Alice Resident at secondlife://Secret%20Region/1/2/3"));
+        typeof(AccountSession).GetMethod("OnScriptDialog", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(a, new object?[]
+        {
+            null, new ScriptDialogEventArgs("Secret Region: Alice Resident", "Furniture", UUID.Zero, UUID.Random(), "Alice", "Resident",
+                9, new List<string> { "OK" }, resident)
+        });
+        Check(output.Count == 2 && output[0].Title == "IM from Resident" && output[1].Category == NotificationCategory.Menus &&
+            output.All(notice => !notice.Message.Contains("Alice Resident") && !notice.Message.Contains("Secret Region") &&
+                !notice.Message.Contains("secondlife://")), "Notification content exposed RLV-hidden names or locations");
+    }),
     ("Object touch targets a touchable root or linked part and rejects stale or non-touchable objects", async () =>
     {
         using var a = new AccountSession(action => action());
@@ -1374,6 +1535,18 @@ static async Task ReceiveIm(Fixture fixture, ImprovedInstantMessagePacket packet
     fixture.Client.Self.IM += Received;
     try { fixture.Receive(packet); await completion.Task.WaitAsync(TimeSpan.FromSeconds(3)); }
     finally { fixture.Client.Self.IM -= Received; }
+}
+
+sealed class RecordingNotificationOutput : INotificationOutput
+{
+    public sealed record Notice(string Key, string AccountId, NotificationCategory Category, string Title, string Body, Action Activate);
+    public List<Notice> Shown { get; } = new();
+    public List<(string? AccountId, NotificationCategory? Category)> Cleared { get; } = new();
+    public string? Error => null;
+    public void Show(string key, string accountId, NotificationCategory category, string title, string body, Action activate) =>
+        Shown.Add(new(key, accountId, category, title, body, activate));
+    public void Clear(string? accountId = null, NotificationCategory? category = null) => Cleared.Add((accountId, category));
+    public void Dispose() { }
 }
 
 sealed class Fixture : IDisposable

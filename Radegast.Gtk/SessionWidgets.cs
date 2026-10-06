@@ -108,7 +108,7 @@ internal sealed class SessionWidgets : IDisposable
         _objectsPanel = new ObjectsPanel(session);
         Tabs.AppendPage(_objectsPanel, new Label("Objects"));
         _rlvPanel = new RlvPanel(session.Rlv);
-        Tabs.AppendPage(_rlvPanel, new Label("RLV"));
+        Tabs.AppendPage(_rlvPanel, new Label("Account Settings"));
         session.Rlv.Changed += UpdateRestrictions;
         session.ConversationChanged += OnConversationChanged;
         session.GroupConversationChanged += OnGroupConversationChanged;
@@ -145,6 +145,35 @@ internal sealed class SessionWidgets : IDisposable
         if (!_imPanel.Open(peerId)) return;
         Tabs.CurrentPage = 1;
         _imPanel.SetDisplayed(_selectedAccount);
+    }
+
+    public bool IsNotificationDisplayed(AccountNotification notice) => notice.Category switch
+    {
+        NotificationCategory.InstantMessages => _imPanel.IsDisplaying(notice.TargetId),
+        NotificationCategory.GroupChats => _groupPanel.IsDisplaying(notice.TargetId),
+        NotificationCategory.WornObjects => Tabs.CurrentPage == 0,
+        NotificationCategory.Friends => Tabs.CurrentPage == 5,
+        _ => false
+    };
+
+    public void OpenNotification(AccountNotification notice)
+    {
+        switch (notice.Category)
+        {
+            case NotificationCategory.InstantMessages:
+                OpenInstantMessages(notice.TargetId);
+                break;
+            case NotificationCategory.GroupChats:
+                Tabs.CurrentPage = 2;
+                _groupPanel.Open(notice.TargetId);
+                break;
+            case NotificationCategory.WornObjects:
+                Tabs.CurrentPage = 0;
+                break;
+            case NotificationCategory.Friends:
+                Tabs.CurrentPage = 5;
+                break;
+        }
     }
 
     private void OnConversationChanged(AccountSession account, ImConversation conversation)

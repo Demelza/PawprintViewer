@@ -239,6 +239,12 @@ internal sealed partial class AccountSession
             message.FromAgentID, message.FromAgentName));
         if (!own) chat.UnreadCount++;
         GroupConversationChanged?.Invoke(this, chat);
+        if (!own)
+        {
+            var name = DisplayConversationName(message.FromAgentID);
+            Notify(NotificationCategory.GroupChats, $"Group chat: {DisplayGroupName(chat.Id)}",
+                $"{name}: {message.Message}", chat.Id);
+        }
     }
 
     private GroupConversation? FindGroupSession(UUID sessionId) => _groupChats.GetValueOrDefault(sessionId)

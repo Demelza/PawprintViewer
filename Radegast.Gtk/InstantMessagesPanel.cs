@@ -111,6 +111,8 @@ internal class ChatConversationsPanel : Box
         if (displayed) RenderConversation();
     }
 
+    public bool IsDisplaying(UUID id) => _displayed && _selected?.Id == id;
+
     public bool Open(UUID peerId)
     {
         if (_disposed) return false;

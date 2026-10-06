@@ -10,6 +10,7 @@ internal sealed class ChildWindowPresenter : IDisposable
     private readonly List<Window> _pending = new();
     private bool _checkingForeground;
     private bool _disposed;
+    internal bool HasFocus => ViewerHasFocus();
 
     public ChildWindowPresenter(Window owner)
     {

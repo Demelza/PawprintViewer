@@ -36,6 +36,19 @@ attempt; this version does not store credentials.
   send `testcommand on` on channel 9; signed channel numbers are accepted, and
   `/0 message` sends public chat. Channel commands respect RLV channel locks.
 - Account-specific logout and unread nearby-chat counts for background accounts.
+- **Global Settings**, below **+ Add account**, controls silent desktop popups
+  for IMs, Group Chats, Worn Objects, Menus, and friends going online/offline.
+  All five are enabled initially. Changes apply to every account and are saved
+  in `$XDG_CONFIG_HOME/pawprint-viewer/settings.json` (normally
+  `~/.config/pawprint-viewer/settings.json`). **Test notification** checks delivery.
+  Linux desktop popups use the system's `libnotify` runtime and notification daemon.
+- Messages already being viewed in the foreground stay quiet. Background menus
+  notify without raising the viewer; clicking a notification selects its account
+  and opens the matching conversation, chat tab, or menu. Popups identify the
+  receiving account, honor RLV name/location restrictions, and replace earlier
+  popups for the same conversation. Initial friend statuses and RLV commands
+  do not produce notifications. Disabling a category or logging out clears its
+  open popups; conversations and script menus continue to work normally.
 - Private IMs have a vertical conversation list on the left and the selected
   resident's transcript and message field on the right. Send with **Send** or
   Enter. Incoming messages create conversations without switching away from
@@ -97,16 +110,16 @@ attempt; this version does not store credentials.
   pending prompts.
 - Common system folders stay at the top of My Inventory; the Type column uses
   20% of the inventory list, and the fixed details pane uses 25% of the view.
-- Per-account RLV/RLVa support, with an RLV tab for enabling it, inspecting
-  active restrictions, and optionally showing command diagnostics in chat.
+- Per-account RLV/RLVa support, with an Account Settings tab for enabling it,
+  inspecting active restrictions, and optionally showing command diagnostics in chat.
 - Script permission requests open separate Allow/Deny windows. RLV permission
   rules can deny requests or automatically accept animation, attachment, and
   control permissions; other permissions still require an explicit response.
 
 ## RLV / RLVa
 
-RLV is enabled for each new account session. Open that account's **RLV** tab
-to turn it off. Turning it off cancels queued commands and clears restrictions
+RLV is enabled for each new account session. Open that account's **Account Settings**
+tab to turn it off. Turning it off cancels queued commands and clears restrictions
 immediately. Restrictions are not saved between logins. After turning it back
 on, use the controlling attachment's RLV menu to have it resend its rules.
 
@@ -145,8 +158,8 @@ empty listing is returned. Current Outfit link targets are fetched even when
 the actual wearable is outside `#RLV`.
 
 For troubleshooting, enable **Show RLV commands and replies in Nearby Chat**
-in the RLV tab. Diagnostics include the actual command, discovered shared-root
-UUID, cached folder/item counts, and the reply sent on the script's channel.
+in the Account Settings tab. Diagnostics include the actual command, discovered
+shared-root UUID, cached folder/item counts, and the reply sent on the script's channel.
 Commands from linked attachment prims apply to their root object.
 Restrictions from missing objects are removed after a two-minute grace period;
 attachment loading during region changes does not immediately clear locks.
@@ -174,6 +187,5 @@ stops, the new pose plays, and attachment/AO animations remain active.
 
 Conference chats, group notices, and group membership/role administration are
 not implemented. Group and conference messages do not become private conversations.
-Inventory item content editors, previews, rez actions, desktop
-notifications, and notification sounds are also pending.
+Inventory item content editors, previews, and rez actions are also pending.
 The [GTK3 client plan](../docs/Gtk3ClientPlan.md) tracks the intended scope.

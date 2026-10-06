@@ -1,4 +1,5 @@
 using Gtk;
+using LibreMetaverse;
 
 namespace Radegast.Gtk;
 
@@ -11,6 +12,7 @@ internal sealed class ScriptDialogWindow : Window
     private readonly Label _source;
     private readonly Label _message;
     private bool _closing;
+    internal UUID ObjectId => _menu.ObjectId;
 
     public ScriptDialogWindow(Window parent, AccountSession session, ScriptMenu menu)
         : base($"{(string.IsNullOrWhiteSpace(menu.ObjectName) ? "Script menu" : menu.ObjectName)} — {session.Name}")

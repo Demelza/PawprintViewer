@@ -8,6 +8,8 @@ internal sealed record FriendResident(UUID Id, string Name, bool IsOnline);
 internal sealed partial class AccountSession
 {
     private readonly HashSet<UUID> _requestedFriendNames = new();
+    private readonly Dictionary<UUID, bool> _friendPresence = new();
+    private bool _friendPresenceReady;
 
     public event Action<AccountSession>? FriendsChanged;
 
@@ -92,8 +94,8 @@ internal sealed partial class AccountSession
     private void InitializeFriends()
     {
         Client.Friends.friendsListReady += OnFriendsReady;
-        Client.Friends.FriendOnline += OnFriendChanged;
-        Client.Friends.FriendOffline += OnFriendChanged;
+        Client.Friends.FriendOnline += OnFriendOnline;
+        Client.Friends.FriendOffline += OnFriendOffline;
         Client.Friends.FriendRightsUpdate += OnFriendChanged;
         Client.Friends.FriendNames += OnFriendNames;
         Client.Friends.FriendshipResponse += OnFriendshipResponse;
@@ -102,7 +104,30 @@ internal sealed partial class AccountSession
     }
 
     private void NotifyFriendsChanged() => _post(() => { if (!_disposed) FriendsChanged?.Invoke(this); });
-    private void OnFriendsReady(object? sender, FriendsReadyEventArgs e) => NotifyFriendsChanged();
+    private void OnFriendsReady(object? sender, FriendsReadyEventArgs e)
+    {
+        var statuses = Client.Friends.FriendList.Values.Select(friend => (friend.UUID, friend.IsOnline)).ToArray();
+        _post(() =>
+        {
+            if (_disposed) return;
+            _friendPresence.Clear();
+            foreach (var (id, online) in statuses) _friendPresence[id] = online;
+            _friendPresenceReady = true;
+            FriendsChanged?.Invoke(this);
+        });
+    }
+    private void OnFriendOnline(object? sender, FriendInfoEventArgs e) => OnFriendPresence(e.Friend.UUID, true);
+    private void OnFriendOffline(object? sender, FriendInfoEventArgs e) => OnFriendPresence(e.Friend.UUID, false);
+    private void OnFriendPresence(UUID id, bool online) => _post(() =>
+    {
+        if (_disposed) return;
+        var known = _friendPresence.TryGetValue(id, out var previous);
+        _friendPresence[id] = online;
+        FriendsChanged?.Invoke(this);
+        if (_friendPresenceReady && known && previous != online && IsConnected)
+            Notify(NotificationCategory.Friends, $"{DisplayFriendName(id)} is {(online ? "online" : "offline")}",
+                string.Empty, id);
+    });
     private void OnFriendChanged(object? sender, FriendInfoEventArgs e) => NotifyFriendsChanged();
     private void OnFriendNames(object? sender, FriendNamesEventArgs e) => NotifyFriendsChanged();
     private void OnFriendshipResponse(object? sender, FriendshipResponseEventArgs e) => NotifyFriendsChanged();
@@ -131,8 +156,8 @@ internal sealed partial class AccountSession
     private void StopFriends()
     {
         Client.Friends.friendsListReady -= OnFriendsReady;
-        Client.Friends.FriendOnline -= OnFriendChanged;
-        Client.Friends.FriendOffline -= OnFriendChanged;
+        Client.Friends.FriendOnline -= OnFriendOnline;
+        Client.Friends.FriendOffline -= OnFriendOffline;
         Client.Friends.FriendRightsUpdate -= OnFriendChanged;
         Client.Friends.FriendNames -= OnFriendNames;
         Client.Friends.FriendshipResponse -= OnFriendshipResponse;

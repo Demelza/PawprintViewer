@@ -12,16 +12,24 @@ internal sealed class MainWindow : Window
     private readonly Dictionary<AccountSession, HashSet<ScriptDialogWindow>> _scriptDialogs = new();
     private readonly Dictionary<AccountSession, HashSet<ScriptPermissionWindow>> _permissionDialogs = new();
     private readonly ChildWindowPresenter _childWindows;
+    private readonly GlobalSettings _globalSettings;
+    private readonly NotificationController _notifications;
     private AccountSession? _selected;
     private LoginWindow? _loginWindow;
+    private GlobalSettingsWindow? _settingsWindow;
 
-    public MainWindow() : base(Program.ViewerName)
+    public MainWindow(GlobalSettings? settings = null, INotificationOutput? notificationOutput = null) : base(Program.ViewerName)
     {
         _childWindows = new ChildWindowPresenter(this);
+        _globalSettings = settings ?? new GlobalSettings();
+        _notifications = new NotificationController(_globalSettings, notificationOutput ?? new DesktopNotificationOutput());
+        Destroyed += (_, _) => _notifications.Dispose();
         SetDefaultSize(1120, 720);
         DeleteEvent += (_, _) =>
         {
             _childWindows.Dispose();
+            _settingsWindow?.CloseSettings();
+            _notifications.Dispose();
             foreach (var session in _sessions.Keys.ToArray())
                 RemoveSession(session);
             _loginWindow?.Destroy();
@@ -42,6 +50,9 @@ internal sealed class MainWindow : Window
         var addButton = new Button("+ Add account");
         addButton.Clicked += (_, _) => ShowLogin();
         rail.PackStart(addButton, false, false, 0);
+        var settingsButton = new Button("Global Settings");
+        settingsButton.Clicked += (_, _) => ShowGlobalSettings();
+        rail.PackStart(settingsButton, false, false, 0);
         root.Attach(rail, 0, 0, 3, 1);
 
         _pages.AddNamed(new Label("Use + Add account to log in."), "empty");
@@ -72,6 +83,20 @@ internal sealed class MainWindow : Window
         ShowChildWindow(_loginWindow, showContents: false);
     }
 
+    private void ShowGlobalSettings()
+    {
+        if (_settingsWindow == null)
+        {
+            _settingsWindow = new GlobalSettingsWindow(this, _globalSettings, _notifications, () =>
+            {
+                Present();
+                ShowGlobalSettings();
+            });
+            _settingsWindow.Destroyed += (_, _) => _settingsWindow = null;
+        }
+        ShowChildWindow(_settingsWindow);
+    }
+
     private void AddSession(AccountSession session)
     {
         var widgets = new SessionWidgets(session);
@@ -89,6 +114,7 @@ internal sealed class MainWindow : Window
         session.NearbyChanged += OnNearbyChanged;
         session.ScriptDialogReceived += OnScriptDialogReceived;
         session.PermissionRequested += OnPermissionRequested;
+        session.NotificationReceived += OnNotification;
         widgets.AccountRow.ShowAll();
         widgets.Root.ShowAll();
         widgets.NearbyPane.ShowAll();
@@ -120,6 +146,8 @@ internal sealed class MainWindow : Window
         session.NearbyChanged -= OnNearbyChanged;
         session.ScriptDialogReceived -= OnScriptDialogReceived;
         session.PermissionRequested -= OnPermissionRequested;
+        session.NotificationReceived -= OnNotification;
+        _notifications.CloseAccount(session.Id);
         if (_scriptDialogs.Remove(session, out var dialogs))
             foreach (var dialog in dialogs.ToArray()) dialog.CloseMenu();
         if (_permissionDialogs.Remove(session, out var permissions))
@@ -147,6 +175,7 @@ internal sealed class MainWindow : Window
     {
         if (!_sessions.TryGetValue(session, out var widgets)) return;
         widgets.UpdateAccountLabel(session == _selected);
+        if (!session.IsConnected) _notifications.CloseAccount(session.Id);
     }
 
     private void OnChatLine(AccountSession session, string line)
@@ -196,5 +225,24 @@ internal sealed class MainWindow : Window
         dialogs.Add(dialog);
         dialog.Destroyed += (_, _) => dialogs.Remove(dialog);
         ShowChildWindow(dialog);
+    }
+
+    private void OnNotification(AccountSession session, AccountNotification notice)
+    {
+        if (!_sessions.TryGetValue(session, out var widgets) || !session.IsConnected) return;
+        var visible = _childWindows.HasFocus && (notice.Category == NotificationCategory.Menus ||
+            (session == _selected && widgets.IsNotificationDisplayed(notice)));
+        _notifications.Notify(session, notice, visible, () => ActivateNotification(session, notice));
+    }
+
+    private void ActivateNotification(AccountSession session, AccountNotification notice)
+    {
+        if (!_sessions.TryGetValue(session, out var widgets) || !session.IsConnected) return;
+        SelectSession(session);
+        widgets.OpenNotification(notice);
+        // A notification click is a manual request to bring the viewer forward.
+        Present();
+        if (notice.Category == NotificationCategory.Menus && _scriptDialogs.TryGetValue(session, out var dialogs) &&
+            dialogs.LastOrDefault(dialog => dialog.ObjectId == notice.TargetId) is { } menu) ShowChildWindow(menu);
     }
 }
