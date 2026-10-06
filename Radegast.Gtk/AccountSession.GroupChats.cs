@@ -198,7 +198,7 @@ internal sealed partial class AccountSession
         if (message.ToAgentID != UUID.Zero && message.ToAgentID != Client.Self.AgentID && message.ToAgentID != message.IMSessionID) return;
         _post(() =>
         {
-            if (_disposed) return;
+            if (_disposed || IsResidentBlocked(message.FromAgentID)) return;
             if (!GroupsLoaded)
             {
                 if (!message.GroupIM && message.Dialog != InstantMessageDialog.SessionSend) return;
@@ -218,6 +218,7 @@ internal sealed partial class AccountSession
         var chat = FindGroupSession(message.IMSessionID);
         if (chat == null || !_groups.ContainsKey(chat.Id)) return;
         var own = message.FromAgentID == Client.Self.AgentID;
+        if (!own && IsResidentBlocked(message.FromAgentID)) return;
         if (!own && Rlv.Enabled && !Rlv.Service.Permissions.CanReceiveIM(message.Message, message.FromAgentID.Guid, chat.Name)) return;
         chat.State = GroupChatState.Joined;
         chat.Error = string.Empty;

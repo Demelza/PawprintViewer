@@ -84,7 +84,8 @@ internal sealed partial class AccountSession
             string.IsNullOrEmpty(message.Message)) return;
         _post(() =>
         {
-            if (_disposed || (Rlv.Enabled && !Rlv.Service.Permissions.CanReceiveIM(message.Message, message.FromAgentID.Guid))) return;
+            if (_disposed || IsResidentBlocked(message.FromAgentID) ||
+                (Rlv.Enabled && !Rlv.Service.Permissions.CanReceiveIM(message.Message, message.FromAgentID.Guid))) return;
             if (FindGroupSession(message.IMSessionID) is { } group && _groups.ContainsKey(group.Id)) return;
             if (!string.IsNullOrWhiteSpace(message.FromAgentName))
                 RememberAvatarName(message.FromAgentID, message.FromAgentName);

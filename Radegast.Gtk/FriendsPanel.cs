@@ -9,7 +9,7 @@ internal sealed class FriendsPanel : Box
     private readonly AccountSession _session;
     private readonly ListBox _list = new() { SelectionMode = SelectionMode.None };
     private readonly Label _status = new("Open this tab to load friends.") { Xalign = 0, Ellipsize = Pango.EllipsizeMode.End };
-    private readonly Dictionary<UUID, FriendPaymentWindow> _payments = new();
+    private readonly Dictionary<UUID, ResidentPaymentWindow> _payments = new();
     private bool _active;
     private bool _refreshQueued;
     private bool _disposed;
@@ -116,13 +116,13 @@ internal sealed class FriendsPanel : Box
             return;
         }
         if (Toplevel is not Window parent) return;
-        var payment = new FriendPaymentWindow(parent, _session, id);
+        var payment = new ResidentPaymentWindow(parent, _session, id, requireFriend: true);
         _payments.Add(id, payment);
         payment.Closed += () => _payments.Remove(id);
         ShowPayment(payment);
     }
 
-    private void ShowPayment(FriendPaymentWindow payment)
+    private void ShowPayment(ResidentPaymentWindow payment)
     {
         if (Toplevel is MainWindow main) main.ShowChildWindow(payment);
         else { payment.ShowAll(); payment.Present(); }

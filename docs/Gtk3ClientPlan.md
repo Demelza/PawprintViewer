@@ -266,6 +266,21 @@ policy so they do not bring a background viewer to the foreground. Hidden names
 become non-clickable `Resident` text; a name lock closes an open profile. Location
 hiding continues to redact location links without concealing profile links.
 
+Profile actions use two rows: IM/Pay/Offer TP, then Add Friend (or Remove Friend)
+and Block (or Unblock), followed by Dismiss. The account that opened the profile
+owns every action. IM selects its conversation/tab; Pay also accepts non-friends
+and uses the shared validated payment prompt; Offer TP uses the same RLV location
+rules as Friends. Friendship offers do not add a friend before acceptance, and
+duplicate pending requests are disabled. Acceptance/removal updates open profiles
+and the friend list. Self/disconnected actions are disabled.
+
+The grid mute list is requested at login and updated by Block/Unblock. Muted
+resident text is filtered before creating messages, unread counts, desktop
+notifications or teleport prompts; private, group and nearby chat all apply it.
+Existing transcripts remain intact. Blocking is independent per account and
+also respects resident text blocks imported from the grid's mute list. Dismissing
+a profile or disconnecting disposes any of its open payment prompts.
+
 ## Private IM checkpoint
 
 The IMs tab has a vertical list of conversation buttons on the left, with the

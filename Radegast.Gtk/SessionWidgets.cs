@@ -141,7 +141,7 @@ internal sealed class SessionWidgets : IDisposable
 
     private bool IsCurrentPage(Widget page) => Tabs.CurrentPage == Tabs.PageNum(page);
 
-    private void OpenInstantMessages(LibreMetaverse.UUID peerId)
+    internal void OpenInstantMessages(LibreMetaverse.UUID peerId)
     {
         if (!_imPanel.Open(peerId)) return;
         Tabs.CurrentPage = Tabs.PageNum(_imPanel);

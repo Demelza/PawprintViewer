@@ -131,6 +131,18 @@ and a password-save failure is reported in that account's Nearby Chat.
   update existing text.
   Clicking opens a GTK profile window with Second Life/First Life text, birth
   date and **Dismiss**. Names and profile access respect RLV name restrictions.
+- Profiles have **IM**, **Pay** and **Offer TP** on the first action row,
+  **Add Friend**/**Remove Friend** and **Block**/**Unblock** on the second,
+  with **Dismiss** underneath. IM selects that resident's conversation in the
+  originating account's IM tab. Pay uses the same whole-number L$ prompt as
+  Friends and also works for non-friends. Offer TP invites the resident to this
+  account's location and honors RLV location restrictions. Friendship requests
+  stay pending until a reply; accepted/removed friends update both views.
+  Blocking updates the account's grid mute list, which is fetched at login,
+  and suppresses that resident's incoming private, group and nearby chat,
+  unread counts, notifications and new teleport prompts. Earlier messages stay
+  in history; Unblock restores future messages. Profile payment prompts close
+  when the profile is dismissed or the account disconnects.
 - Group Chats uses the same full-height layout as IMs. Existing group memberships
   appear alphabetically on the left; select a group to join its chat, then use
   **Send** or Enter. **Refresh groups** reloads memberships. Incoming group
@@ -269,7 +281,7 @@ G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tes
 
 The native chat-link check tests name resolution in all three chat tabs and both
 profile text tabs, clicks through GTK events, delayed profile/name replies, text
-selection and window cleanup. It uses
+selection, profile actions and payment/window cleanup. It uses
 simulated packets and does not connect to a grid:
 
 ```sh

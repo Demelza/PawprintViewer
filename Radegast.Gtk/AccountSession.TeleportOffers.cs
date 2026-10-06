@@ -20,6 +20,7 @@ internal sealed partial class AccountSession
     {
         if (_disposed || !IsConnected || Client.Network.CurrentSim == null) return "This account is disconnected.";
         if (!IsTeleportOfferPending(offer)) return "This teleport offer is no longer pending.";
+        if (IsResidentBlocked(offer.SenderId)) return "This resident is blocked.";
         if (Rlv.Enabled)
         {
             var permissions = Rlv.Service.Permissions;
@@ -47,7 +48,7 @@ internal sealed partial class AccountSession
             (message.ToAgentID != UUID.Zero && message.ToAgentID != Client.Self.AgentID)) return;
         _post(() =>
         {
-            if (_disposed || !IsConnected || Client.Network.CurrentSim == null) return;
+            if (_disposed || !IsConnected || Client.Network.CurrentSim == null || IsResidentBlocked(message.FromAgentID)) return;
             var key = (message.FromAgentID, message.IMSessionID);
             if (_teleportOffers.ContainsKey(key) || !_seenTeleportOffers.Add(key)) return;
             _recentTeleportOffers.Enqueue(key);

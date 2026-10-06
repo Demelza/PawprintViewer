@@ -60,6 +60,7 @@ internal sealed partial class AccountSession : IDisposable
         Client.Self.ScriptDialog += OnScriptDialog;
         Client.Self.ScriptQuestion += OnScriptQuestion;
         Client.Self.IM += OnInstantMessage;
+        Client.Self.MuteListUpdated += OnBlockListUpdated;
         Client.Grid.CoarseLocationUpdate += OnCoarseLocationUpdate;
         Client.Avatars.UUIDNameReply += OnNameReply;
         Client.Network.RegisterLoginResponseCallback(OnLoginResponse);
@@ -85,6 +86,8 @@ internal sealed partial class AccountSession : IDisposable
         Name = Net.LoginOptions.FullName;
         Status = "Connecting…";
         _friendPresence.Reset();
+        _pendingFriendshipOffers.Clear();
+        _residentBlockChanges.Clear();
         StateChanged?.Invoke(this);
         Net.Login();
     }
@@ -224,6 +227,7 @@ internal sealed partial class AccountSession : IDisposable
             {
                 _friendPresence.Connected();
                 Name = Client.Self.Name;
+                Client.Self.RequestMuteList();
                 RequestGroups();
                 _ = RetrieveOfflineInstantMessagesAsync();
             }
@@ -268,6 +272,7 @@ internal sealed partial class AccountSession : IDisposable
         ResetTeleportOffers();
         ResetGroupChats();
         _friendPresence.Reset();
+        _pendingFriendshipOffers.Clear();
         lock (_nameLock) _requestedFriendNames.Clear();
         StateChanged?.Invoke(this);
         NearbyChanged?.Invoke(this);
@@ -281,6 +286,7 @@ internal sealed partial class AccountSession : IDisposable
         _post(() =>
         {
             if (_disposed) return;
+            if (e.SourceType == ChatSourceType.Agent && IsResidentBlocked(e.SourceID)) return;
             var permissions = Rlv.Service.Permissions;
             if (Rlv.Enabled && e.SourceType == ChatSourceType.Agent && e.SourceID != Client.Self.AgentID &&
                 !permissions.CanReceiveChat(e.Message, e.SourceID.Guid)) return;
@@ -402,6 +408,7 @@ internal sealed partial class AccountSession : IDisposable
         Client.Self.ScriptDialog -= OnScriptDialog;
         Client.Self.ScriptQuestion -= OnScriptQuestion;
         Client.Self.IM -= OnInstantMessage;
+        Client.Self.MuteListUpdated -= OnBlockListUpdated;
         Client.Grid.CoarseLocationUpdate -= OnCoarseLocationUpdate;
         Client.Avatars.UUIDNameReply -= OnNameReply;
         Client.Network.UnregisterLoginResponseCallback(OnLoginResponse);

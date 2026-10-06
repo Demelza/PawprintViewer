@@ -148,7 +148,76 @@ internal static class NativeChatLinkChecks
                         Collect();
                         break;
                     case 12:
-                        Console.WriteLine("PASS native GTK profile names/links in chat and both profile tabs; delayed replies, drafts, selection and cleanup");
+                        Click(group, "Momoi Pawprint");
+                        break;
+                    case 13:
+                        var actions = Profiles(main, account)[avatar];
+                        actions.ShowAll();
+                        var imAction = Field<global::Gtk.Button>(actions, "_im");
+                        var payAction = Field<global::Gtk.Button>(actions, "_pay");
+                        var tpAction = Field<global::Gtk.Button>(actions, "_teleport");
+                        var friendAction = Field<global::Gtk.Button>(actions, "_friend");
+                        var blockAction = Field<global::Gtk.Button>(actions, "_block");
+                        Check(imAction.Parent == payAction.Parent && imAction.Parent == tpAction.Parent &&
+                            friendAction.Parent == blockAction.Parent && friendAction.Parent != imAction.Parent &&
+                            friendAction.Label == "Add Friend" && friendAction.Sensitive && blockAction.Label == "Block",
+                            "Profile actions did not use the requested rows or non-friend state");
+                        imAction.Click();
+                        Check(widgets.Tabs.CurrentPage == widgets.Tabs.PageNum(imPanel) &&
+                            Field<ChatConversation>(imPanel, "_selected").Id == avatar,
+                            "The profile IM button did not select its resident's conversation in the IM tab");
+                        packets();
+                        payAction.Click();
+                        var payment = Field<ResidentPaymentWindow>(actions, "_payment");
+                        payment.ShowAll();
+                        var amount = Field<Entry>(payment, "_amount");
+                        var submit = Field<global::Gtk.Button>(payment, "_pay");
+                        Check(!submit.Sensitive && Field<Label>(payment, "_recipientLabel").Text == "Pay Momoi Pawprint",
+                            "The payment prompt used the wrong resident or accepted an empty amount");
+                        amount.Text = "1.5";
+                        Check(amount.Text == "" && !submit.Sensitive, "A fractional paste became a different payment");
+                        amount.Text = "1234";
+                        Check(submit.Sensitive, "A valid non-friend payment was disabled");
+                        submit.Click();
+                        var paid = packets().OfType<MoneyTransferRequestPacket>().Single();
+                        Check(paid.MoneyData.DestID == avatar && paid.MoneyData.Amount == 1234 &&
+                            Field<ResidentPaymentWindow?>(actions, "_payment") == null,
+                            "The payment button submitted the wrong amount/recipient or retained the popup");
+                        tpAction.Click();
+                        Check(packets().OfType<StartLurePacket>().Single().TargetData.Single().TargetID == avatar,
+                            "The profile teleport button sent an invitation to another resident");
+                        friendAction.Click();
+                        Check(packets().OfType<ImprovedInstantMessagePacket>().Single().MessageBlock.Dialog ==
+                            (byte)InstantMessageDialog.FriendshipOffered && !friendAction.Sensitive && friendAction.Label == "Add Friend",
+                            "The friendship button did not send an offer or stay pending until acceptance");
+                        fixture.Receive(fixture.PrivateIm(avatar, "Momoi Pawprint", "accepted", InstantMessageDialog.FriendshipAccepted));
+                        break;
+                    case 14:
+                        var accepted = Profiles(main, account)[avatar];
+                        var remove = Field<global::Gtk.Button>(accepted, "_friend");
+                        Check(remove.Label == "Remove Friend" && remove.Sensitive, "Accepted friendship did not update the profile button");
+                        remove.Click();
+                        Check(packets().OfType<TerminateFriendshipPacket>().Single().ExBlock.OtherID == avatar &&
+                            remove.Label == "Add Friend", "The remove-friend button failed to update immediately");
+                        Field<global::Gtk.Button>(accepted, "_block").Click();
+                        Check(packets().OfType<UpdateMuteListEntryPacket>().Single().MuteData.MuteID == avatar && account.IsResidentBlocked(avatar),
+                            "The block button did not blacklist the profile's resident");
+                        break;
+                    case 15:
+                        var blocked = Profiles(main, account)[avatar];
+                        Check(Field<global::Gtk.Button>(blocked, "_block").Label == "Unblock", "Blocking did not refresh the profile button");
+                        Field<global::Gtk.Button>(blocked, "_block").Click();
+                        Check(!account.IsResidentBlocked(avatar) && packets().OfType<RemoveMuteListEntryPacket>().Single().MuteData.MuteID == avatar,
+                            "The unblock button retained the resident's mute entry");
+                        Field<global::Gtk.Button>(blocked, "_pay").Click();
+                        var pendingPayment = Field<ResidentPaymentWindow>(blocked, "_payment");
+                        blocked.CloseProfile();
+                        Check(pendingPayment.Handle == IntPtr.Zero && Profiles(main, account).Count == 0,
+                            "Dismissing a profile retained its pending payment window");
+                        Collect();
+                        break;
+                    case 16:
+                        Console.WriteLine("PASS native GTK profile links and action rows: IM tab, non-friend payment, teleport, add/remove friend, block/unblock and cleanup");
                         Application.Quit();
                         return false;
                 }

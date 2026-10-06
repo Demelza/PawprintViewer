@@ -50,12 +50,9 @@ internal sealed partial class AccountSession
         if (missing.Count > 0) Client.Avatars.RequestAvatarNames(missing);
     }
 
-    public bool CanPayFriend(UUID id) => !_disposed && IsConnected && Client.Network.CurrentSim != null &&
-        id != UUID.Zero && id != Client.Self.AgentID && Client.Friends.FriendList.ContainsKey(id);
+    public bool CanPayFriend(UUID id) => CanPayResident(id) && IsFriend(id);
 
-    public bool CanOfferFriendTeleport(UUID id) => CanPayFriend(id) &&
-        (!Rlv.Enabled || Rlv.Service.Permissions.CanShowLoc() ||
-         (Client.Friends.FriendList.TryGetValue(id, out var friend) && friend.CanSeeMeOnMap));
+    public bool CanOfferFriendTeleport(UUID id) => IsFriend(id) && CanOfferTeleport(id);
 
     public static bool TryParsePaymentAmount(string text, out int amount)
     {
@@ -67,19 +64,13 @@ internal sealed partial class AccountSession
     public void PayFriend(UUID id, int amount)
     {
         RequireFriend(id);
-        if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount), "Enter a positive whole amount in L$.");
-        if (Balance is { } balance && amount > balance)
-            throw new InvalidOperationException("This amount exceeds your current balance.");
-        Client.Self.GiveAvatarMoney(id, amount);
+        PayResident(id, amount);
     }
 
     public void OfferFriendTeleport(UUID id)
     {
         RequireFriend(id);
-        if (!CanOfferFriendTeleport(id)) throw new InvalidOperationException("Offering a teleport to this friend is restricted by RLV.");
-        // The simulator supplies this account's current location in the offer.
-        // A generic message also avoids exposing a location hidden by RLV.
-        Client.Self.SendTeleportLure(id, "Join me!");
+        OfferTeleport(id);
     }
 
     private void RequireFriend(UUID id)
@@ -126,8 +117,18 @@ internal sealed partial class AccountSession
     });
     private void OnFriendChanged(object? sender, FriendInfoEventArgs e) => NotifyFriendsChanged();
     private void OnFriendNames(object? sender, FriendNamesEventArgs e) => NotifyFriendsChanged();
-    private void OnFriendshipResponse(object? sender, FriendshipResponseEventArgs e) => NotifyFriendsChanged();
-    private void OnFriendshipTerminated(object? sender, FriendshipTerminatedEventArgs e) => NotifyFriendsChanged();
+    private void OnFriendshipResponse(object? sender, FriendshipResponseEventArgs e) => _post(() =>
+    {
+        if (_disposed) return;
+        _pendingFriendshipOffers.Remove(e.AgentID);
+        FriendsChanged?.Invoke(this);
+    });
+    private void OnFriendshipTerminated(object? sender, FriendshipTerminatedEventArgs e) => _post(() =>
+    {
+        if (_disposed) return;
+        _pendingFriendshipOffers.Remove(e.AgentID);
+        FriendsChanged?.Invoke(this);
+    });
 
     private void OnFriendPaymentReply(object? sender, MoneyBalanceReplyEventArgs e)
     {

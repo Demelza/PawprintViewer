@@ -116,6 +116,7 @@ internal sealed class MainWindow : Window
         session.TeleportOfferReceived += OnTeleportOfferReceived;
         session.NotificationReceived += OnNotification;
         session.AvatarProfileRequested += OnAvatarProfileRequested;
+        session.InstantMessagesRequested += OnInstantMessagesRequested;
         widgets.AccountRow.ShowAll();
         widgets.Root.ShowAll();
         widgets.NearbyPane.ShowAll();
@@ -150,6 +151,7 @@ internal sealed class MainWindow : Window
         session.TeleportOfferReceived -= OnTeleportOfferReceived;
         session.NotificationReceived -= OnNotification;
         session.AvatarProfileRequested -= OnAvatarProfileRequested;
+        session.InstantMessagesRequested -= OnInstantMessagesRequested;
         _notifications.CloseAccount(session.Id);
         if (_scriptDialogs.Remove(session, out var dialogs))
             foreach (var dialog in dialogs.ToArray()) dialog.CloseMenu();
@@ -263,5 +265,12 @@ internal sealed class MainWindow : Window
             profile.Destroyed += (_, _) => profiles.Remove(avatar);
         }
         ShowChildWindow(profile);
+    }
+
+    private void OnInstantMessagesRequested(AccountSession session, UUID avatar)
+    {
+        if (!_sessions.TryGetValue(session, out var widgets) || !session.CanOpenConversation(avatar)) return;
+        SelectSession(session);
+        widgets.OpenInstantMessages(avatar);
     }
 }
