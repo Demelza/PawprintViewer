@@ -8,6 +8,7 @@ namespace Radegast.Gtk;
 internal sealed class ChatHistoryView : TextView
 {
     private readonly AccountSession _session;
+    private readonly bool _followEnd;
     private readonly List<(string Text, bool NewLine)> _lines = new();
     private readonly Dictionary<UUID, TextTag> _links = new();
     private readonly Dictionary<UUID, string> _linkNames = new();
@@ -16,9 +17,10 @@ internal sealed class ChatHistoryView : TextView
     private int _pressX, _pressY, _revision;
     private bool _stopped, _connected;
 
-    public ChatHistoryView(AccountSession session)
+    public ChatHistoryView(AccountSession session, bool followEnd = true)
     {
         _session = session;
+        _followEnd = followEnd;
         _connected = session.IsConnected;
         Editable = false;
         CursorVisible = false;
@@ -43,6 +45,8 @@ internal sealed class ChatHistoryView : TextView
         Clear();
         _lines.Add((text, false));
         InsertText(text, false);
+        Buffer.PlaceCursor(Buffer.StartIter);
+        ScrollToIter(Buffer.StartIter, 0, false, 0, 0);
     }
 
     public void Clear()
@@ -125,7 +129,7 @@ internal sealed class ChatHistoryView : TextView
         GtkDispatch.Post(() =>
         {
             if (_stopped || _revision != revision) return;
-            if (bottom) ScrollToIter(Buffer.EndIter, 0, false, 0, 1);
+            if (_followEnd && bottom) ScrollToIter(Buffer.EndIter, 0, false, 0, 1);
             else if (adjustment != null) adjustment.Value = scroll;
         });
     }

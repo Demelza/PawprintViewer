@@ -259,8 +259,15 @@ Clicking a name opens a read-only GTK profile window for that resident and
 originating account, containing Second Life/First Life text and birth date.
 Both profile text tabs use the same clickable-name renderer, including delayed
 name resolution, paragraph layout, theme colors and RLV redaction.
+The text area is about 50% taller, with automatic vertical scrolling and wrapped
+lines. Full text starts at the top; name updates preserve the reading position.
 Profile retrieval uses UDP with the AgentProfile capability when available.
-The first successful reply supplies the fields. Dismissal/logout cancels pending
+The first legacy reply can populate a fallback while the full profile loads.
+A successful matching AgentProfile reply supersedes legacy text in either reply
+order, preserving all paragraphs and Unicode, including legitimately empty or
+shorter full fields. Late UDP replies cannot replace a full profile. Grids without
+AgentProfile (or with failed capability requests) retain the legacy fallback.
+Dismissal/logout cancels pending
 requests and ignores late replies. These windows use the existing presentation
 policy so they do not bring a background viewer to the foreground. Hidden names
 become non-clickable `Resident` text; a name lock closes an open profile. Location

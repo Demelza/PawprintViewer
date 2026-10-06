@@ -21,18 +21,20 @@ internal sealed class AvatarProfileWindow : Window
     private readonly Button _block = new("Block");
     private readonly Window _parent;
     private ResidentPaymentWindow? _payment;
-    private bool _closing, _received;
+    private bool _closing, _received, _receivedCapability;
 
     public AvatarProfileWindow(Window parent, AccountSession session, UUID avatar) : base("Avatar profile")
     {
         _session = session;
         _avatar = avatar;
         _parent = parent;
-        _about = new ChatHistoryView(session);
-        _firstLife = new ChatHistoryView(session);
+        _about = new ChatHistoryView(session, followEnd: false);
+        _firstLife = new ChatHistoryView(session, followEnd: false);
         TransientFor = parent;
         DestroyWithParent = true;
-        SetDefaultSize(440, 430);
+        // Keep the action rows unchanged and add roughly half the previous
+        // text area's height to the window.
+        SetDefaultSize(440, 520);
         var content = new Box(Orientation.Vertical, 8) { BorderWidth = 12 };
         Add(content);
         content.PackStart(_name, false, false, 0);
@@ -161,18 +163,22 @@ internal sealed class AvatarProfileWindow : Window
         try
         {
             var (success, profile) = await _session.Client.Avatars.RequestAgentProfileAsync(_avatar, token).ConfigureAwait(false);
-            if (success && profile != null)
+            if (success && profile != null && profile.AvatarID == _avatar)
                 GtkDispatch.Post(() => Apply(profile.MemberSince.Year > 1 ? profile.MemberSince.ToShortDateString() : "",
-                    profile.SecondLifeAboutText, profile.FirstLifeAboutText));
+                    profile.SecondLifeAboutText, profile.FirstLifeAboutText, complete: true));
         }
         catch (OperationCanceledException) { }
         catch (Exception) { /* The UDP reply can still populate the profile. */ }
     }
 
-    private void Apply(string born, string about, string firstLife)
+    private void Apply(string born, string about, string firstLife, bool complete = false)
     {
-        if (_closing || _received || !_session.CanViewAvatarProfile(_avatar)) return;
+        // Legacy UDP profiles limit About text to 512 bytes and First Life to
+        // a one-byte-length field. A full capability reply supersedes them,
+        // regardless of which request finishes first.
+        if (_closing || _receivedCapability || (_received && !complete) || !_session.CanViewAvatarProfile(_avatar)) return;
         _received = true;
+        _receivedCapability = complete;
         _born.Text = string.IsNullOrWhiteSpace(born) ? string.Empty : $"Born: {born}";
         _about.SetText(about ?? string.Empty);
         _firstLife.SetText(firstLife ?? string.Empty);

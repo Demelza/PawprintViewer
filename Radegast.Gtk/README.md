@@ -131,6 +131,11 @@ and a password-save failure is reported in that account's Nearby Chat.
   update existing text.
   Clicking opens a GTK profile window with Second Life/First Life text, birth
   date and **Dismiss**. Names and profile access respect RLV name restrictions.
+  Both text tabs wrap long lines and scroll vertically in a text area about
+  50% taller than before. The full AgentProfile reply takes priority over the
+  shorter legacy reply, including when it arrives later. Profiles start at the
+  top; resolving names preserves the reading position. Grids without that
+  capability use the legacy text supplied by the server.
 - Profiles have **IM**, **Pay** and **Offer TP** on the first action row,
   **Add Friend**/**Remove Friend** and **Block**/**Unblock** on the second,
   with **Dismiss** underneath. IM selects that resident's conversation in the
@@ -286,6 +291,14 @@ simulated packets and does not connect to a grid:
 
 ```sh
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --chat-links-smoke
+```
+
+The full-profile check uses simulated HTTP replies to test long Second Life and
+First Life text, capability/legacy reply order, fallback failures, the larger
+text area and scrolling through the final paragraphs:
+
+```sh
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --profile-text-smoke
 ```
 
 For a live check, use an RLV attachment to test detection, lock/unlock and
