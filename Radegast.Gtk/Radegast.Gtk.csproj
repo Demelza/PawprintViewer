@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>Radegast.Gtk</AssemblyName>
+    <AssemblyName>PawprintViewer</AssemblyName>
     <AssemblyTitle>Pawprint Viewer</AssemblyTitle>
     <Product>Pawprint Viewer</Product>
   </PropertyGroup>
