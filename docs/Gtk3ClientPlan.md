@@ -85,7 +85,20 @@ with destination controls in the remaining space on the left. GTK's minimum
 width accommodates the map and controls without changing the 15% side panes.
 Opening the tab or selecting an account whose Map tab is open centers on that
 avatar. Dragging pans; wheel scrolling zooms around the pointer. A green marker
-tracks the avatar and a gold marker identifies the entered destination.
+tracks the avatar, blue markers show other avatars, and a gold marker identifies
+the entered destination. Clicking a point resolves its region and fills local
+X/Y on the left while retaining the entered Z altitude. Clicks and drags are
+distinguished using GTK's drag threshold, and no click teleports automatically.
+New selections or field edits cancel older lookups. Clicking water leaves no
+region selected. The map has no hover popup or failed-image overlay.
+
+Connected simulators supply live coarse avatar coordinates. Other visible
+regions supply approximate population positions, which can represent groups.
+Population queries only run for the displayed account's map, have a limit of
+64 visible regions and four requests per second, and refresh after 30 seconds.
+Zoomed-out views display available markers without querying the entire world.
+Disconnects, empty responses and stale positions remove obsolete dots; RLV
+nearby-avatar restrictions hide other residents.
 
 Region search uses the simulator's map lookup and centers on the matched region.
 X/Y/Z occupy one row and are local coordinates in meters within that region.

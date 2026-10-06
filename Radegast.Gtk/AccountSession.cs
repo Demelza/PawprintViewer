@@ -267,6 +267,7 @@ internal sealed partial class AccountSession : IDisposable
         Rlv.SetEnabled(false);
         if (enabled) Rlv.SetEnabled(true);
         _nearby.Clear();
+        _mapAvatarPositions.Clear();
         ResetGroupChats();
         _friendPresence.Clear();
         _friendPresenceReady = false;
@@ -315,10 +316,11 @@ internal sealed partial class AccountSession : IDisposable
 
     private void OnCoarseLocationUpdate(object? sender, CoarseLocationUpdateEventArgs e)
     {
+        // Share one immutable position snapshot between the map and nearby list.
+        var positions = e.Positions.ToArray();
+        RecordMapAvatarPositions(e.Simulator, positions);
         if (e.Simulator != Client.Network.CurrentSim) return;
 
-        // Copy the network event's mutable data before posting it to GTK.
-        var positions = e.Positions.ToArray();
         var selfId = Client.Self.AgentID;
         var selfPosition = e.Positions.TryGetValue(selfId, out var coarseSelf)
             ? coarseSelf : Client.Self.SimPosition;

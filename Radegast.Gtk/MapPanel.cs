@@ -4,7 +4,7 @@ using System.Globalization;
 
 namespace Radegast.Gtk;
 
-internal sealed class MapPanel : Box
+internal sealed partial class MapPanel : Box
 {
     private readonly AccountSession _session;
     private readonly Box _controls = new(Orientation.Vertical, 8) { Margin = 8 };
@@ -20,7 +20,7 @@ internal sealed class MapPanel : Box
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _lookup;
     private GridRegion? _destination;
-    private bool _displayed, _disposed, _busy, _updating;
+    private bool _displayed, _disposed, _busy, _updating, _findingDestination;
     private ulong? _avatarRegion;
     private int _mapHeight = 128;
 
@@ -38,12 +38,16 @@ internal sealed class MapPanel : Box
         {
             coordinates.PackStart(new Label(name), false, false, 0);
             coordinates.PackStart(field, true, true, 0);
-            field.Changed += (_, _) => UpdateTarget();
+            field.Changed += (_, _) =>
+            {
+                if (!_updating && _findingDestination) CancelLookup();
+                UpdateTarget();
+            };
         }
         _controls.PackStart(coordinates, false, false, 0);
         _controls.PackStart(_teleport, false, false, 0);
         _controls.PackStart(_status, false, false, 0);
-        _controls.PackEnd(new Label("Drag to pan · Scroll to zoom\nGreen: avatar · Gold: destination")
+        _controls.PackEnd(new Label("Click to select · Drag to pan\nScroll to zoom\nGreen: you · Blue: others\nGold: destination")
             { Xalign = 0, Wrap = true, MaxWidthChars = 26 }, false, false, 0);
         var content = new Box(Orientation.Horizontal, 0);
         content.PackStart(_controls, true, true, 0);
@@ -64,12 +68,16 @@ internal sealed class MapPanel : Box
         _search.Clicked += (_, _) => Search();
         _region.Activated += (_, _) => Search();
         _teleport.Clicked += (_, _) => Teleport();
+        _map.PointSelected += SelectPoint;
+        _map.ViewportChanged += SchedulePopulation;
+        _session.Client.Grid.GridRegion += OnMapRegion;
+        _session.Client.Grid.GridItems += OnMapPopulation;
         _session.StateChanged += OnStateChanged;
         _session.Rlv.Changed += UpdateRestrictions;
         GLib.Timeout.Add(1000, () =>
         {
             if (_disposed) return false;
-            if (_displayed) UpdateAvatar();
+            if (_displayed) { UpdateAvatar(); RefreshPeople(); RequestPopulation(); }
             return true;
         });
         UpdateRestrictions();
@@ -114,7 +122,7 @@ internal sealed class MapPanel : Box
     {
         if (_disposed || _displayed == displayed) return;
         _displayed = displayed;
-        if (!displayed) CancelLookup();
+        if (!displayed) { CancelLookup(); _populationRequests.Clear(); }
         UpdateRestrictions();
         if (displayed) CenterOnAvatar();
     }
@@ -132,6 +140,12 @@ internal sealed class MapPanel : Box
         var allowed = _session.CanViewWorldMap;
         _pages.VisibleChildName = allowed ? "map" : "restricted";
         _map.SetActive(_displayed && _session.IsConnected && allowed, _session.MapTileServer);
+        if (!_session.CanViewMapPeople || !_session.IsConnected)
+        {
+            _populationRequests.Clear();
+            _population.Clear();
+            _map.SetPeople(Array.Empty<MapAvatarMarker>());
+        }
         if (!allowed || !_session.IsConnected)
         {
             CancelLookup();
@@ -146,6 +160,7 @@ internal sealed class MapPanel : Box
             _status.Text = allowed ? "Connect to use the map." : string.Empty;
         }
         else if (_displayed && _avatarRegion == null) CenterOnAvatar();
+        if (_displayed) { RefreshPeople(); SchedulePopulation(); }
         UpdateButtons();
     }
 
@@ -209,7 +224,7 @@ internal sealed class MapPanel : Box
         _search.Sensitive = enabled && !string.IsNullOrWhiteSpace(_region.Text);
         var error = !TryReadPosition(out var position) ? "Enter valid X, Y and Z numbers." :
             _destination is { } region ? _session.MapTeleportError(region, position) : null;
-        _teleport.Sensitive = enabled && !string.IsNullOrWhiteSpace(_region.Text) && error == null;
+        _teleport.Sensitive = enabled && !_findingDestination && !string.IsNullOrWhiteSpace(_region.Text) && error == null;
         _teleport.TooltipText = error ?? "Teleport to the entered region and local X, Y, Z coordinates";
     }
 
@@ -218,8 +233,10 @@ internal sealed class MapPanel : Box
         if (_disposed || _busy || !_search.Sensitive) return;
         CancelLookup();
         var lookup = _lookup = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _findingDestination = true;
         var name = _region.Text.Trim();
         _status.Text = "Finding region…";
+        UpdateButtons();
         try
         {
             var region = await _session.FindMapRegionAsync(name, lookup.Token).ConfigureAwait(false);
@@ -228,6 +245,7 @@ internal sealed class MapPanel : Box
                 if (_disposed || lookup.IsCancellationRequested || _lookup != lookup || !_displayed ||
                     !_session.IsConnected || !_session.CanViewWorldMap) return;
                 _destination = region;
+                _findingDestination = false;
                 _updating = true;
                 _region.Text = region.Name;
                 _updating = false;
@@ -243,7 +261,59 @@ internal sealed class MapPanel : Box
             GtkDispatch.Post(() =>
             {
                 if (!_disposed && !lookup.IsCancellationRequested && _lookup == lookup)
+                {
+                    _findingDestination = false;
                     _status.Text = _session.RedactText(ex.Message);
+                    UpdateButtons();
+                }
+            });
+        }
+    }
+
+    private async void SelectPoint(double worldX, double worldY)
+    {
+        if (_disposed || !_displayed || _busy || !_session.IsConnected || !_session.CanViewWorldMap) return;
+        CancelLookup();
+        var lookup = _lookup = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _findingDestination = true;
+        _destination = null;
+        _updating = true;
+        _region.Text = string.Empty;
+        _x.Text = Math.Floor(worldX % 256).ToString("0", CultureInfo.InvariantCulture);
+        _y.Text = Math.Floor(worldY % 256).ToString("0", CultureInfo.InvariantCulture);
+        _updating = false;
+        _map.SetTarget(Math.Floor(worldX), Math.Floor(worldY));
+        _status.Text = "Finding region…";
+        UpdateButtons();
+        try
+        {
+            var region = await _session.FindMapRegionAtAsync(worldX, worldY, lookup.Token).ConfigureAwait(false);
+            GtkDispatch.Post(() =>
+            {
+                if (_disposed || lookup.IsCancellationRequested || _lookup != lookup || !_displayed ||
+                    !_session.IsConnected || !_session.CanViewWorldMap) return;
+                Utils.LongToUInts(region.RegionHandle, out var x, out var y);
+                _destination = region;
+                _findingDestination = false;
+                _updating = true;
+                _region.Text = region.Name;
+                _x.Text = Math.Floor(worldX - x).ToString("0", CultureInfo.InvariantCulture);
+                _y.Text = Math.Floor(worldY - y).ToString("0", CultureInfo.InvariantCulture);
+                _updating = false;
+                _status.Text = string.Empty;
+                UpdateTarget();
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            GtkDispatch.Post(() =>
+            {
+                if (_disposed || lookup.IsCancellationRequested || _lookup != lookup) return;
+                _findingDestination = false;
+                _map.SetTarget(null, null);
+                _status.Text = _session.RedactText(ex.Message);
+                UpdateButtons();
             });
         }
     }
@@ -285,6 +355,7 @@ internal sealed class MapPanel : Box
 
     private void CancelLookup()
     {
+        _findingDestination = false;
         _lookup?.Cancel();
         _lookup?.Dispose();
         _lookup = null;
@@ -296,6 +367,10 @@ internal sealed class MapPanel : Box
         _disposed = true;
         _session.StateChanged -= OnStateChanged;
         _session.Rlv.Changed -= UpdateRestrictions;
+        _map.PointSelected -= SelectPoint;
+        _map.ViewportChanged -= SchedulePopulation;
+        _session.Client.Grid.GridRegion -= OnMapRegion;
+        _session.Client.Grid.GridItems -= OnMapPopulation;
         CancelLookup();
         _lifetime.Cancel();
         _lifetime.Dispose();

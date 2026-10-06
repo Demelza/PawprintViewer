@@ -40,7 +40,10 @@ attempt; this version does not store credentials.
   Attachments, Objects, Map, and Account Settings.
 - Map displays the grid's world tiles in a square occupying the full tab height.
   It centers on the selected avatar whenever opened. Drag to pan and scroll to
-  zoom around the pointer. Green marks your avatar; gold marks the destination.
+  zoom around the pointer. Click to fill the region and local X/Y destination
+  fields; the entered Z altitude is retained. Dragging never selects a destination,
+  and clicks never teleport automatically. Green marks your avatar, blue marks
+  other avatars, and gold marks the destination. The map has no hover popup.
   Region and destination controls are on the left. The window's minimum width
   accommodates the square map and controls while retaining the 15% side panes.
 - Enter a region name and click the magnifier (or press Enter) to find that
@@ -54,6 +57,13 @@ attempt; this version does not store credentials.
   search and teleport. This is a 2D GTK/Cairo view, without a 3D renderer.
   RLV world-map/location restrictions hide the map, and teleport, local-distance
   and stand restrictions apply to the Teleport button and its requests.
+- Other-avatar markers use live coarse positions from connected regions and the
+  grid's approximate population positions for other regions in a close map view.
+  Larger blue dots can represent a group at one location. Population queries are
+  limited to 64 visible regions and four requests per second, refreshing after
+  30 seconds; very wide views show available positions without scanning the
+  entire grid. RLV nearby-avatar restrictions hide these markers.
+  Failed image downloads retry quietly without an error overlay on the map.
 - **Global Settings**, below **+ Add account**, controls silent desktop popups
   for IMs, Group Chats, Worn Objects, Menus, and friends going online/offline.
   All five are enabled initially. Changes apply to every account and are saved
@@ -206,7 +216,8 @@ dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrame
 ```
 
 The map's native GTK scroll check requires a desktop display, but no login. It
-checks smooth scrolling and regular mouse-wheel events through GTK callbacks:
+checks smooth scrolling, regular mouse-wheel events, click/drag separation, and
+avatar-marker drawing through GTK callbacks:
 
 ```sh
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --map-scroll-smoke

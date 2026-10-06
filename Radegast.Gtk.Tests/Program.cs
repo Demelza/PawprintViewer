@@ -15,6 +15,9 @@ if (args.Contains("--map-scroll-smoke", StringComparer.Ordinal)) return NativeMa
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Map clicks resolve the exact region, reject water and invalid points, and respect cancellation and RLV", MapChecks.ClickedRegions),
+    ("Map avatar markers use live account-specific coordinates, exclude self and respect nearby restrictions", MapChecks.AvatarPositions),
+    ("Map population queries remain bounded when zooming out and at grid edges", MapChecks.PopulationBounds),
     ("World map stays north-up, pans with the pointer and zooms around the cursor with aligned tiles", MapChecks.Viewport),
     ("World map searches exact region names, keeps accounts separate and cancels pending lookups", MapChecks.RegionLookup),
     ("World map and teleports enforce RLV locks, connectivity and coordinate bounds", MapChecks.Permissions),

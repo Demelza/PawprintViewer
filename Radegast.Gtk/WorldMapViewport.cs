@@ -36,6 +36,23 @@ internal sealed class WorldMapViewport
         Center(anchor.X - (x - width / 2) / Scale, anchor.Y + (y - height / 2) / Scale);
     }
 
+    /// <summary>Limit population queries to a close view; never scan thousands of regions at world zoom.</summary>
+    public IReadOnlyList<(ushort X, ushort Y)> VisibleRegions(double width, double height)
+    {
+        var bottomLeft = ToWorld(0, height, width, height);
+        var topRight = ToWorld(width, 0, width, height);
+        var minX = Math.Max(0, (int)Math.Floor(bottomLeft.X / 256));
+        var minY = Math.Max(0, (int)Math.Floor(bottomLeft.Y / 256));
+        var maxX = Math.Min(65535, (int)Math.Floor(topRight.X / 256));
+        var maxY = Math.Min(65535, (int)Math.Floor(topRight.Y / 256));
+        if ((long)(maxX - minX + 1) * (maxY - minY + 1) > 64) return Array.Empty<(ushort, ushort)>();
+        var regions = new List<(ushort X, ushort Y)>();
+        for (var y = minY; y <= maxY; y++)
+            for (var x = minX; x <= maxX; x++) regions.Add(((ushort)x, (ushort)y));
+        return regions.OrderBy(region => Math.Abs(region.X * 256 + 128 - CenterX) +
+            Math.Abs(region.Y * 256 + 128 - CenterY)).ToArray();
+    }
+
     public IReadOnlyList<MapTile> VisibleTiles(double width, double height)
     {
         var level = TileLevel;

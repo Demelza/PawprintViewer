@@ -5,6 +5,104 @@ using Radegast.Gtk;
 
 internal static class MapChecks
 {
+    public static async Task ClickedRegions()
+    {
+        using var account = new AccountSession(action => action());
+        using var fixture = new Fixture(account);
+        var packets = fixture.CapturePackets();
+        Connected(account, true);
+        fixture.Simulator.Name = "Home";
+        fixture.Simulator.Handle = Utils.UIntsToLong(256000, 256512);
+        try
+        {
+            var home = await account.FindMapRegionAtAsync(256255.99, 256513);
+            Check(home.Name == "Home" && packets().Count == 0, "Clicking home required a lookup or rounded into the next region");
+            var lookup = account.FindMapRegionAtAsync(256256, 256600);
+            var request = packets().OfType<MapBlockRequestPacket>().Single();
+            Check(request.PositionData.MinX == 1001 && request.PositionData.MaxX == 1001 &&
+                request.PositionData.MinY == 1002 && request.PositionData.MaxY == 1002,
+                "A map click queried the wrong region or requested more than the clicked cell");
+            fixture.Receive(RegionReply("Next Region", 1001, 1002));
+            var region = await lookup.WaitAsync(TimeSpan.FromSeconds(3));
+            Check(region.Name == "Next Region" && region.RegionHandle == Utils.UIntsToLong(256256, 256512), "Click did not resolve the region name");
+            var water = account.FindMapRegionAtAsync(257000, 256600);
+            _ = packets();
+            fixture.Receive(RegionReply("", 1003, 1002, SimAccess.NonExistent));
+            await Rejected(water);
+            foreach (var (x, y) in new[] { (-1d, 256600d), (double.NaN, 256600d), (256000d, double.PositiveInfinity), (65536d * 256, 256600d) })
+                await Rejected(account.FindMapRegionAtAsync(x, y));
+            Check(packets().Count == 0, "An invalid map point emitted a lookup");
+            using var cancel = new CancellationTokenSource();
+            var pending = account.FindMapRegionAtAsync(258000, 256600, cancel.Token);
+            _ = packets(); cancel.Cancel(); await Canceled(pending);
+            fixture.Simulator.SizeX = 512;
+            Check((await account.FindMapRegionAtAsync(256300, 256600)).RegionHandle == fixture.Simulator.Handle && packets().Count == 0,
+                "A click inside a large current region used a neighbouring region name");
+            await fixture.Command("@showworldmap=n");
+            await Rejected(account.FindMapRegionAtAsync(256000, 256600));
+        }
+        finally { Connected(account, false); }
+        await Rejected(account.FindMapRegionAtAsync(256000, 256600));
+    }
+
+    public static async Task AvatarPositions()
+    {
+        using var account = new AccountSession(action => action());
+        using var other = new AccountSession(action => action());
+        using var fixture = new Fixture(account);
+        using var otherFixture = new Fixture(other);
+        fixture.CapturePackets(); otherFixture.CapturePackets();
+        Connected(account, true); Connected(other, true);
+        fixture.Simulator.Handle = Utils.UIntsToLong(256000, 256512);
+        using var neighbour = new Simulator(account.Client, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 13001),
+            Utils.UIntsToLong(256256, 256512));
+        account.Client.Network.Simulators.Add(neighbour);
+        typeof(Simulator).GetField("connected", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(neighbour, true);
+        var person = UUID.Random();
+        var second = UUID.Random();
+        try
+        {
+            fixture.Receive(Coarse((fixture.Owner, 10, 20), (person, 45, 55)));
+            await WaitUntil(() => account.GetMapAvatarLocations().SelectMany(region => region.People).Count() == 1);
+            var marker = account.GetMapAvatarLocations().SelectMany(region => region.People).Single();
+            Check(marker == new MapAvatarMarker(256045, 256567), "Nearby avatar coordinates were not converted to world meters");
+            Check(other.GetMapAvatarLocations().Count == 0, "Avatar markers leaked between accounts");
+            fixture.Receive(Coarse((person, 1, 2), (second, 30, 40)), neighbour);
+            await WaitUntil(() => account.GetMapAvatarLocations().SelectMany(region => region.People).Count() == 2);
+            Check(account.GetMapAvatarLocations().SelectMany(region => region.People).Contains(new MapAvatarMarker(256286, 256552)),
+                "Connected neighbouring avatars were omitted or the same resident was drawn twice");
+            typeof(Simulator).GetField("connected", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(neighbour, false);
+            Check(account.GetMapAvatarLocations().SelectMany(region => region.People).Count() == 1, "Disconnected neighbours retained markers");
+            await fixture.Command("@shownearby=n");
+            Check(!account.CanViewMapPeople && account.GetMapAvatarLocations().Count == 0, "Nearby restrictions revealed other avatars");
+            await fixture.Command("@clear");
+            fixture.Receive(Coarse((fixture.Owner, 10, 20)));
+            await WaitUntil(() => !account.GetMapAvatarLocations().SelectMany(region => region.People).Any());
+        }
+        finally { Connected(account, false); Connected(other, false); }
+        Check(account.GetMapAvatarLocations().Count == 0, "Disconnected account retained visible markers");
+    }
+
+    public static Task PopulationBounds()
+    {
+        var view = new WorldMapViewport();
+        view.Center(256128, 256640);
+        var regions = view.VisibleRegions(682, 682);
+        Check(regions.Count == 9 && regions.Contains(((ushort)1000, (ushort)1002)), "Nearby population queries omitted visible cells");
+        view.Zoom(-8, 341, 341, 682, 682);
+        Check(view.VisibleRegions(682, 682).Count == 0, "Zooming out attempted to query hundreds of regions");
+        view.Center(0, 0);
+        view.Zoom(8, 341, 341, 682, 682);
+        Check(view.VisibleRegions(682, 682).All(region => region.X <= 1 && region.Y <= 1), "Population queries wrapped around the grid edge");
+        return Task.CompletedTask;
+    }
+
+    private static CoarseLocationUpdatePacket Coarse(params (UUID Id, byte X, byte Y)[] people) => new()
+    {
+        AgentData = people.Select(person => new CoarseLocationUpdatePacket.AgentDataBlock { AgentID = person.Id }).ToArray(),
+        Location = people.Select(person => new CoarseLocationUpdatePacket.LocationBlock { X = person.X, Y = person.Y, Z = 10 }).ToArray()
+    };
+
     public static Task Viewport()
     {
         var map = new WorldMapViewport();

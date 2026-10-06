@@ -21,22 +21,24 @@ internal sealed class MapCanvas : DrawingArea
     private bool _disposed;
     private bool _queued;
     private bool _dragging;
-    private double _dragX, _dragY;
+    private bool _moved;
+    private double _pressX, _pressY, _dragX, _dragY;
     private long _generation, _used;
-    private string? _error;
     private (double X, double Y)? _avatar, _target;
+    private IReadOnlyList<MapAvatarMarker> _people = Array.Empty<MapAvatarMarker>();
 
     public WorldMapViewport Viewport { get; } = new();
+    public event Action<double, double>? PointSelected;
+    public event System.Action? ViewportChanged;
 
     public MapCanvas()
     {
         WidthRequest = HeightRequest = 128;
         Vexpand = true;
         CanFocus = true;
-        TooltipText = "Drag to move the map. Scroll to zoom. Green: your avatar; gold: destination.";
         AddEvents((int)(EventMask.ButtonPressMask | EventMask.ButtonReleaseMask |
             EventMask.PointerMotionMask | EventMask.ScrollMask | EventMask.SmoothScrollMask));
-        SizeAllocated += (_, _) => ScheduleTiles();
+        SizeAllocated += (_, _) => { ScheduleTiles(); ViewportChanged?.Invoke(); };
     }
 
     public void SetActive(bool active, Uri? server)
@@ -48,7 +50,6 @@ internal sealed class MapCanvas : DrawingArea
             foreach (var tile in _images.Values) tile.Image?.Dispose();
             _images.Clear();
             _server = server;
-            _error = null;
             _dragging = false;
         }
         if (_active && !active) CancelDownloads();
@@ -63,6 +64,7 @@ internal sealed class MapCanvas : DrawingArea
         Viewport.Center(x, y);
         ScheduleTiles();
         QueueDraw();
+        ViewportChanged?.Invoke();
     }
 
     public void SetAvatar(double? x, double? y)
@@ -77,11 +79,20 @@ internal sealed class MapCanvas : DrawingArea
         QueueDraw();
     }
 
+    public void SetPeople(IReadOnlyList<MapAvatarMarker> people)
+    {
+        _people = people;
+        QueueDraw();
+    }
+
     protected override bool OnButtonPressEvent(EventButton evnt)
     {
         if (!_active || evnt.Button != 1) return base.OnButtonPressEvent(evnt);
         GrabFocus();
         _dragging = true;
+        _moved = false;
+        _pressX = evnt.X;
+        _pressY = evnt.Y;
         _dragX = evnt.X;
         _dragY = evnt.Y;
         return true;
@@ -90,7 +101,14 @@ internal sealed class MapCanvas : DrawingArea
     protected override bool OnButtonReleaseEvent(EventButton evnt)
     {
         if (evnt.Button != 1) return base.OnButtonReleaseEvent(evnt);
+        var clicked = _active && _dragging && !_moved &&
+            !global::Gtk.Drag.CheckThreshold(this, (int)_pressX, (int)_pressY, (int)evnt.X, (int)evnt.Y);
         _dragging = false;
+        if (clicked && evnt.X >= 0 && evnt.X < AllocatedWidth && evnt.Y >= 0 && evnt.Y < AllocatedHeight)
+        {
+            var point = Viewport.ToWorld(evnt.X, evnt.Y, AllocatedWidth, AllocatedHeight);
+            PointSelected?.Invoke(point.X, point.Y);
+        }
         return true;
     }
 
@@ -98,11 +116,17 @@ internal sealed class MapCanvas : DrawingArea
     {
         if (!_active || !_dragging) return base.OnMotionNotifyEvent(evnt);
         if ((evnt.State & ModifierType.Button1Mask) == 0) { _dragging = false; return false; }
+        if (!_moved)
+        {
+            if (!global::Gtk.Drag.CheckThreshold(this, (int)_pressX, (int)_pressY, (int)evnt.X, (int)evnt.Y)) return true;
+            _moved = true;
+        }
         Viewport.Pan(evnt.X - _dragX, evnt.Y - _dragY);
         _dragX = evnt.X;
         _dragY = evnt.Y;
         ScheduleTiles();
         QueueDraw();
+        ViewportChanged?.Invoke();
         return true;
     }
 
@@ -112,9 +136,11 @@ internal sealed class MapCanvas : DrawingArea
         var steps = evnt.Direction switch { ScrollDirection.Up => 1d, ScrollDirection.Down => -1d, _ => 0d };
         if (evnt.Direction == ScrollDirection.Smooth) steps = -evnt.DeltaY;
         if (steps == 0) return false;
+        if (_dragging) _moved = true;
         Viewport.Zoom(steps, evnt.X, evnt.Y, AllocatedWidth, AllocatedHeight);
         ScheduleTiles();
         QueueDraw();
+        ViewportChanged?.Invoke();
         return true;
     }
 
@@ -143,6 +169,7 @@ internal sealed class MapCanvas : DrawingArea
             }
         }
         DrawGrid(context, width, height);
+        foreach (var person in _people) DrawPerson(context, person, width, height);
         if (_target is { } target) DrawMarker(context, target, width, height, false);
         if (_avatar is { } avatar) DrawMarker(context, avatar, width, height, true);
         // Labels use Pango and therefore the system font, including its scale setting.
@@ -156,7 +183,6 @@ internal sealed class MapCanvas : DrawingArea
         context.Stroke();
         Caption(context, $"{meters:0} m", 12, height - 38);
         if (_server == null) Caption(context, "This grid did not provide a map tile service.", 8, 38);
-        else if (_error != null) Caption(context, "Map images unavailable. Region search still works.", 8, 38);
         else if (_images.Count == 0) Caption(context, "Loading map…", 8, 38);
         return true;
     }
@@ -192,6 +218,19 @@ internal sealed class MapCanvas : DrawingArea
         context.SetSourceRGB(avatar ? 0.3 : 1, avatar ? 1 : 0.75, avatar ? 0.4 : 0.15);
         context.Arc(x, y, avatar ? 4 : 6, 0, Math.PI * 2);
         if (avatar) context.Fill(); else { context.LineWidth = 2; context.Stroke(); }
+    }
+
+    private void DrawPerson(Context context, MapAvatarMarker person, int width, int height)
+    {
+        var (x, y) = Viewport.ToScreen(person.X, person.Y, width, height);
+        var radius = person.Count > 1 ? 5 : 3;
+        if (x < -6 || x > width + 6 || y < -6 || y > height + 6) return;
+        context.SetSourceRGB(0, 0, 0);
+        context.Arc(x, y, radius + 1, 0, Math.PI * 2);
+        context.Fill();
+        context.SetSourceRGB(0.3, 0.65, 1);
+        context.Arc(x, y, radius, 0, Math.PI * 2);
+        context.Fill();
     }
 
     private void Caption(Context context, string text, double x, double y)
@@ -258,8 +297,6 @@ internal sealed class MapCanvas : DrawingArea
             }
             catch (Exception ex) { image?.Dispose(); image = null; error = ex; }
             _images[tile] = new(image, DateTime.UtcNow.AddSeconds(error == null ? 600 : 30)) { Used = ++_used };
-            if (error != null) _error = error.Message;
-            else if (image != null) _error = null;
             var visible = Viewport.VisibleTiles(AllocatedWidth, AllocatedHeight).ToHashSet();
             // Keep every visible tile on large displays; evicting one would request it
             // again on the next pass. Off-screen history remains bounded.
