@@ -259,6 +259,16 @@ Clicking a name opens a read-only GTK profile window for that resident and
 originating account, containing Second Life/First Life text and birth date.
 Both profile text tabs use the same clickable-name renderer, including delayed
 name resolution, paragraph layout, theme colors and RLV redaction.
+They also parse `[URL label]` markup and display the supplied label, preserving
+spaces and Unicode. HTTP/HTTPS links open the exact URL in the default browser,
+including map SLURLs. Agent `/about` labels open the linked profile and `/pay`
+labels open the shared payment prompt for the linked UUID, which can differ from
+the profile owner. A link click never sends money: the user enters an amount and
+clicks Pay in the prompt. Activating another recipient replaces the existing
+prompt; repeated clicks for the same recipient reuse it. Malformed markup and
+unsupported schemes/actions remain text. Live name/location and connection
+permissions are checked while rendering and again on click. Labeled markup
+applies to profile text; chat messages keep their existing rendering and content.
 The text area is about 50% taller, with automatic vertical scrolling and wrapped
 lines. Full text starts at the top; name updates preserve the reading position.
 Profile retrieval uses UDP with the AgentProfile capability when available.

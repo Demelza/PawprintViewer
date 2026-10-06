@@ -1,5 +1,6 @@
 using Gtk;
 using LibreMetaverse;
+using System.Diagnostics;
 
 namespace Radegast.Gtk;
 
@@ -20,16 +21,21 @@ internal sealed class AvatarProfileWindow : Window
     private readonly Button _friend = new("Add Friend");
     private readonly Button _block = new("Block");
     private readonly Window _parent;
+    private readonly Action<string> _openWebLink;
     private ResidentPaymentWindow? _payment;
+    private UUID _paymentRecipient;
     private bool _closing, _received, _receivedCapability;
 
-    public AvatarProfileWindow(Window parent, AccountSession session, UUID avatar) : base("Avatar profile")
+    public AvatarProfileWindow(Window parent, AccountSession session, UUID avatar, Action<string>? openWebLink = null) : base("Avatar profile")
     {
         _session = session;
         _avatar = avatar;
         _parent = parent;
-        _about = new ChatHistoryView(session, followEnd: false);
-        _firstLife = new ChatHistoryView(session, followEnd: false);
+        _openWebLink = openWebLink ?? OpenBrowser;
+        _about = new ChatHistoryView(session, followEnd: false, profileLinks: true);
+        _firstLife = new ChatHistoryView(session, followEnd: false, profileLinks: true);
+        _about.ProfileLinkActivated += OnProfileLink;
+        _firstLife.ProfileLinkActivated += OnProfileLink;
         TransientFor = parent;
         DestroyWithParent = true;
         // Keep the action rows unchanged and add roughly half the previous
@@ -54,7 +60,7 @@ internal sealed class AvatarProfileWindow : Window
         relationship.PackStart(_block, true, true, 0);
         content.PackStart(relationship, false, false, 0);
         _im.Clicked += (_, _) => RunAction(() => _session.RequestInstantMessages(_avatar));
-        _pay.Clicked += (_, _) => RunAction(OpenPayment);
+        _pay.Clicked += (_, _) => RunAction(() => OpenPayment(_avatar));
         _teleport.Clicked += (_, _) => RunAction(() =>
         {
             _session.OfferTeleport(_avatar);
@@ -139,13 +145,29 @@ internal sealed class AvatarProfileWindow : Window
         RefreshPresentation();
     }
 
-    private void OpenPayment()
+    private static void OpenBrowser(string url)
     {
-        if (!_session.CanPayResident(_avatar)) return;
+        using var process = Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    }
+
+    private void OnProfileLink(ProfileTextLink link) => RunAction(() =>
+    {
+        if (!_session.CanUseProfileLink(link)) return;
+        if (link.Action == ProfileLinkAction.Web) _openWebLink(link.Url);
+        else if (link.Action == ProfileLinkAction.PayResident) OpenPayment(link.AvatarId);
+    });
+
+    private void OpenPayment(UUID recipient)
+    {
+        if (!_session.CanPayResident(recipient)) return;
+        if (_payment != null && _paymentRecipient != recipient) _payment.ClosePayment();
+        _session.RequestChatAvatarNames(new[] { recipient });
         if (_payment == null)
         {
-            _payment = new ResidentPaymentWindow(this, _session, _avatar);
-            _payment.Closed += () => _payment = null;
+            _paymentRecipient = recipient;
+            var payment = new ResidentPaymentWindow(this, _session, recipient);
+            _payment = payment;
+            payment.Closed += () => { if (_payment == payment) _payment = null; };
         }
         if (_parent is MainWindow main) main.ShowChildWindow(_payment);
         else _payment.ShowAll();
@@ -203,6 +225,8 @@ internal sealed class AvatarProfileWindow : Window
         _session.StateChanged -= OnNamesChanged;
         _session.BlockListChanged -= OnNamesChanged;
         _session.Rlv.Changed -= RefreshPresentation;
+        _about.ProfileLinkActivated -= OnProfileLink;
+        _firstLife.ProfileLinkActivated -= OnProfileLink;
         _about.Stop();
         _firstLife.Stop();
         _payment?.ClosePayment();

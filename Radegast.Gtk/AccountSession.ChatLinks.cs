@@ -54,13 +54,37 @@ internal sealed partial class AccountSession
 
     public IReadOnlyList<ChatTextSpan> FormatChatText(string text)
     {
-        var parsed = AvatarProfileLinks.Parse(text);
+        return FormatTextSpans(AvatarProfileLinks.Parse(text));
+    }
+
+    public IReadOnlyList<ChatTextSpan> FormatProfileText(string text) => FormatTextSpans(ProfileTextLinks.Parse(text));
+
+    public bool CanUseProfileLink(ProfileTextLink link) => !_disposed && (link.Action switch
+    {
+        ProfileLinkAction.Web => !link.IsLocation || !Rlv.Enabled || Rlv.Service.Permissions.CanShowLoc(),
+        ProfileLinkAction.AvatarProfile => CanViewAvatarProfile(link.AvatarId),
+        ProfileLinkAction.PayResident => CanViewAvatarProfile(link.AvatarId) && CanPayResident(link.AvatarId),
+        _ => false
+    });
+
+    private IReadOnlyList<ChatTextSpan> FormatTextSpans(IReadOnlyList<ChatTextSpan> parsed)
+    {
+        var avatars = parsed.Select(span => span.Link?.AvatarId ?? span.AvatarId).Where(id => id != UUID.Zero).ToArray();
         // Prime cached friend names before redacting the surrounding plain text.
-        foreach (var span in parsed.Where(span => span.AvatarId != UUID.Zero)) DisplayChatAvatarName(span.AvatarId);
-        var spans = parsed.Select(span => span.AvatarId == UUID.Zero
-            ? new ChatTextSpan(RedactText(span.Text))
-            : new ChatTextSpan(DisplayChatAvatarName(span.AvatarId), CanViewAvatarProfile(span.AvatarId) ? span.AvatarId : UUID.Zero)).ToArray();
-        RequestChatAvatarNames(parsed.Select(span => span.AvatarId));
+        foreach (var id in avatars) DisplayChatAvatarName(id);
+        var spans = parsed.Select(span =>
+        {
+            if (span.Link is { } link)
+            {
+                if (link.AvatarId != UUID.Zero && !CanShowAvatarName(link.AvatarId)) return new ChatTextSpan("Resident");
+                if (link.IsLocation && !CanUseProfileLink(link)) return new ChatTextSpan("[location hidden]");
+                return new ChatTextSpan(RedactText(span.Text), Link: CanUseProfileLink(link) ? link : null);
+            }
+            return span.AvatarId == UUID.Zero
+                ? new ChatTextSpan(RedactText(span.Text))
+                : new ChatTextSpan(DisplayChatAvatarName(span.AvatarId), CanViewAvatarProfile(span.AvatarId) ? span.AvatarId : UUID.Zero);
+        }).ToArray();
+        RequestChatAvatarNames(avatars);
         return spans;
     }
 }

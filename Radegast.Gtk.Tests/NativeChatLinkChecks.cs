@@ -248,7 +248,7 @@ internal static class NativeChatLinkChecks
     private static TextTag TagAt(ChatHistoryView view, string name) =>
         view.Buffer.GetIterAtOffset(Offset(view.Buffer.Text, name)).Tags.Single();
     private static int Offset(string text, string name) => text[..text.LastIndexOf(name, StringComparison.Ordinal)].EnumerateRunes().Count();
-    private static void Click(ChatHistoryView view, string name, bool drag = false)
+    internal static void Click(ChatHistoryView view, string name, bool drag = false)
     {
         var iter = view.Buffer.GetIterAtOffset(Offset(view.Buffer.Text, name));
         var rectangle = view.GetIterLocation(iter);

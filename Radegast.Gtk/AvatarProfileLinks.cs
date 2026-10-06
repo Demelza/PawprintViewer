@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace Radegast.Gtk;
 
-internal sealed record ChatTextSpan(string Text, UUID AvatarId = default);
+internal sealed record ChatTextSpan(string Text, UUID AvatarId = default, ProfileTextLink? Link = null);
 
 /// <summary>Recognizes profile SLURLs while retaining surrounding text and punctuation.</summary>
 internal static class AvatarProfileLinks

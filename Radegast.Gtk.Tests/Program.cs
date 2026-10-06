@@ -14,6 +14,7 @@ if (args.Contains("--map-scroll-smoke", StringComparer.Ordinal)) return NativeMa
 if (args.Contains("--login-smoke", StringComparer.Ordinal)) return NativeLoginChecks.Run();
 if (args.Contains("--chat-links-smoke", StringComparer.Ordinal)) return NativeChatLinkChecks.Run();
 if (args.Contains("--profile-text-smoke", StringComparer.Ordinal)) return NativeProfileTextChecks.Run();
+if (args.Contains("--profile-links-smoke", StringComparer.Ordinal)) return NativeProfileLinkChecks.Run();
 
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
@@ -21,6 +22,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Chat profile links retain punctuation and Unicode and ignore unrelated or malformed URLs", ChatLinkChecks.Parsing),
     ("Chat profile links resolve names once per account and refresh on server name replies", ChatLinkChecks.Names),
     ("Chat profile links open the referenced avatar and enforce name/location restrictions", ChatLinkChecks.Restrictions),
+    ("Bracketed profile links display Unicode labels and retain exact web/payment/profile targets", ProfileLinkChecks.Parsing),
+    ("Malformed profile markup and unsupported URL schemes/actions retain their original text", ProfileLinkChecks.InvalidMarkup),
+    ("Profile labels preserve chat behavior and respect live RLV/name/location and connection restrictions", ProfileLinkChecks.FormattingAndRestrictions),
     ("Profile IMs, payments and teleport invites target non-friends on the correct account and enforce validation/RLV", ProfileActionChecks.Contact),
     ("Profile friendship offers await acceptance, allow retries and remove friends immediately", ProfileActionChecks.Friendship),
     ("Profile blocks synchronize with the grid mute list and filter chat, unread counts, notifications and offers per account", ProfileActionChecks.Blocking),

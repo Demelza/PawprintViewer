@@ -4,23 +4,27 @@ using LibreMetaverse;
 
 namespace Radegast.Gtk;
 
-/// <summary>Read-only text with account-specific, clickable avatar profile names.</summary>
+/// <summary>Read-only chat or profile text with account-specific, clickable links.</summary>
 internal sealed class ChatHistoryView : TextView
 {
     private readonly AccountSession _session;
     private readonly bool _followEnd;
+    private readonly bool _profileLinks;
     private readonly List<(string Text, bool NewLine)> _lines = new();
-    private readonly Dictionary<UUID, TextTag> _links = new();
+    private readonly Dictionary<ProfileTextLink, TextTag> _links = new();
     private readonly Dictionary<UUID, string> _linkNames = new();
     private Cursor? _hand;
-    private UUID _pressedLink;
+    private ProfileTextLink? _pressedLink;
     private int _pressX, _pressY, _revision;
     private bool _stopped, _connected;
 
-    public ChatHistoryView(AccountSession session, bool followEnd = true)
+    public event Action<ProfileTextLink>? ProfileLinkActivated;
+
+    public ChatHistoryView(AccountSession session, bool followEnd = true, bool profileLinks = false)
     {
         _session = session;
         _followEnd = followEnd;
+        _profileLinks = profileLinks;
         _connected = session.IsConnected;
         Editable = false;
         CursorVisible = false;
@@ -59,7 +63,7 @@ internal sealed class ChatHistoryView : TextView
     private void ClearBuffer()
     {
         _revision++;
-        _pressedLink = UUID.Zero;
+        _pressedLink = null;
         Buffer.Text = string.Empty;
         foreach (var tag in _links.Values)
         {
@@ -72,7 +76,7 @@ internal sealed class ChatHistoryView : TextView
 
     private void InsertText(string text, bool newLine)
     {
-        foreach (var span in _session.FormatChatText(text))
+        foreach (var span in _profileLinks ? _session.FormatProfileText(text) : _session.FormatChatText(text))
         {
             var offset = Buffer.CharCount;
             var end = Buffer.EndIter;
@@ -80,17 +84,19 @@ internal sealed class ChatHistoryView : TextView
             var start = Buffer.GetIterAtOffset(offset);
             // Text inserted at a tag boundary can inherit the preceding avatar's tag.
             Buffer.RemoveAllTags(start, end);
-            if (span.AvatarId != UUID.Zero)
+            var link = span.Link ?? (span.AvatarId != UUID.Zero ? ProfileTextLink.Avatar(span.AvatarId) : null);
+            if (link != null)
             {
-                if (!_links.TryGetValue(span.AvatarId, out var tag))
+                if (!_links.TryGetValue(link, out var tag))
                 {
-                    tag = new TextTag("avatar-" + span.AvatarId) { Underline = Pango.Underline.Single };
+                    tag = new TextTag(span.Link == null ? "avatar-" + span.AvatarId : "link-" + _links.Count)
+                        { Underline = Pango.Underline.Single };
                     tag.ForegroundRgba = StyleContext.GetColor(StateFlags.Link);
                     Buffer.TagTable.Add(tag);
-                    _links.Add(span.AvatarId, tag);
+                    _links.Add(link, tag);
                 }
                 Buffer.ApplyTag(tag, start, end);
-                _linkNames[span.AvatarId] = span.Text;
+                if (span.AvatarId != UUID.Zero) _linkNames[span.AvatarId] = span.Text;
             }
         }
         if (!newLine) return;
@@ -102,7 +108,7 @@ internal sealed class ChatHistoryView : TextView
 
     private void OnNamesChanged(AccountSession account)
     {
-        if (_linkNames.Any(link => link.Value != _session.DisplayChatAvatarName(link.Key) || !_session.CanViewAvatarProfile(link.Key)))
+        if (_profileLinks || _linkNames.Any(link => link.Value != _session.DisplayChatAvatarName(link.Key) || !_session.CanViewAvatarProfile(link.Key)))
             RefreshText();
     }
 
@@ -134,19 +140,19 @@ internal sealed class ChatHistoryView : TextView
         });
     }
 
-    private UUID LinkAt(Event evnt, double x, double y)
+    private ProfileTextLink? LinkAt(Event evnt, double x, double y)
     {
-        if (_stopped || evnt.Window == null) return UUID.Zero;
+        if (_stopped || evnt.Window == null) return null;
         WindowToBufferCoords(GetWindowType(evnt.Window), (int)x, (int)y, out var bx, out var by);
-        if (!GetIterAtLocation(out var iter, bx, by)) return UUID.Zero;
-        foreach (var (id, tag) in _links)
-            if (iter.HasTag(tag) && _session.CanViewAvatarProfile(id)) return id;
-        return UUID.Zero;
+        if (!GetIterAtLocation(out var iter, bx, by)) return null;
+        foreach (var (link, tag) in _links)
+            if (iter.HasTag(tag) && _session.CanUseProfileLink(link)) return link;
+        return null;
     }
 
     protected override bool OnButtonPressEvent(EventButton evnt)
     {
-        _pressedLink = evnt.Button == 1 && evnt.Type == EventType.ButtonPress ? LinkAt(evnt, evnt.X, evnt.Y) : UUID.Zero;
+        _pressedLink = evnt.Button == 1 && evnt.Type == EventType.ButtonPress ? LinkAt(evnt, evnt.X, evnt.Y) : null;
         _pressX = (int)evnt.X; _pressY = (int)evnt.Y;
         return base.OnButtonPressEvent(evnt);
     }
@@ -154,12 +160,13 @@ internal sealed class ChatHistoryView : TextView
     protected override bool OnButtonReleaseEvent(EventButton evnt)
     {
         var handled = base.OnButtonReleaseEvent(evnt);
-        var id = _pressedLink;
-        _pressedLink = UUID.Zero;
-        if (evnt.Button == 1 && id != UUID.Zero && id == LinkAt(evnt, evnt.X, evnt.Y) && !Buffer.HasSelection &&
+        var link = _pressedLink;
+        _pressedLink = null;
+        if (evnt.Button == 1 && link != null && link == LinkAt(evnt, evnt.X, evnt.Y) && !Buffer.HasSelection &&
             !global::Gtk.Drag.CheckThreshold(this, _pressX, _pressY, (int)evnt.X, (int)evnt.Y))
         {
-            _session.OpenAvatarProfile(id);
+            if (link.Action == ProfileLinkAction.AvatarProfile) _session.OpenAvatarProfile(link.AvatarId);
+            else ProfileLinkActivated?.Invoke(link);
             return true;
         }
         return handled;
@@ -170,7 +177,7 @@ internal sealed class ChatHistoryView : TextView
         var window = GetWindow(TextWindowType.Text);
         if (window != null)
         {
-            var link = LinkAt(evnt, evnt.X, evnt.Y) != UUID.Zero;
+            var link = LinkAt(evnt, evnt.X, evnt.Y) != null;
             if (link) _hand ??= new Cursor(Display, CursorType.Hand2);
             window.Cursor = link ? _hand : null;
         }

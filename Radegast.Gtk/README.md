@@ -136,6 +136,13 @@ and a password-save failure is reported in that account's Nearby Chat.
   shorter legacy reply, including when it arrives later. Profiles start at the
   top; resolving names preserves the reading position. Grids without that
   capability use the legacy text supplied by the server.
+- Both profile text tabs render `[URL label]` links using the supplied label,
+  including spaces and Unicode. HTTP/HTTPS links (including map SLURLs) open
+  in the default browser. Agent `/about` links open that resident's profile;
+  `/pay` links open a payment prompt for the linked resident on the originating
+  account. Money is sent only after entering an amount and clicking **Pay**.
+  Name and location restrictions also apply to labeled links. Unsupported or
+  malformed markup stays as text.
 - Profiles have **IM**, **Pay** and **Offer TP** on the first action row,
   **Add Friend**/**Remove Friend** and **Block**/**Unblock** on the second,
   with **Dismiss** underneath. IM selects that resident's conversation in the
@@ -299,6 +306,14 @@ text area and scrolling through the final paragraphs:
 
 ```sh
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --profile-text-smoke
+```
+
+The labeled-profile-link check clicks web, payment and avatar links in both
+profile tabs, checks payment recipients, selection and window cleanup, and
+captures browser requests without launching a browser or paying anyone:
+
+```sh
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --profile-links-smoke
 ```
 
 For a live check, use an RLV attachment to test detection, lock/unlock and
