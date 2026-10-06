@@ -92,6 +92,9 @@ internal sealed class SessionWidgets : IDisposable
         chatPage.PackStart(compose, false, false, 0);
         Tabs.AppendPage(chatPage, new Label("Nearby Chat"));
 
+        _friendsPanel = new FriendsPanel(session);
+        _friendsPanel.ImRequested += OpenInstantMessages;
+        Tabs.AppendPage(_friendsPanel, new Label("Friends"));
         _imPanel = new InstantMessagesPanel(session);
         Tabs.AppendPage(_imPanel, _imTabLabel);
         _groupPanel = new GroupChatsPanel(session);
@@ -102,11 +105,9 @@ internal sealed class SessionWidgets : IDisposable
         Tabs.AppendPage(_inventoryPages, new Label("Inventory"));
         _attachmentsPanel = new AttachmentsPanel(session);
         Tabs.AppendPage(_attachmentsPanel, new Label("Attachments"));
-        _friendsPanel = new FriendsPanel(session);
-        _friendsPanel.ImRequested += OpenInstantMessages;
-        Tabs.AppendPage(_friendsPanel, new Label("Friends"));
         _objectsPanel = new ObjectsPanel(session);
         Tabs.AppendPage(_objectsPanel, new Label("Objects"));
+        Tabs.AppendPage(new Box(Orientation.Vertical, 0), new Label("Map"));
         _rlvPanel = new RlvPanel(session.Rlv);
         Tabs.AppendPage(_rlvPanel, new Label("Account Settings"));
         session.Rlv.Changed += UpdateRestrictions;
@@ -117,16 +118,16 @@ internal sealed class SessionWidgets : IDisposable
         Tabs.SwitchPage += (_, args) =>
         {
             if (_disposed) return;
-            _imPanel.SetDisplayed(_selectedAccount && args.PageNum == 1);
-            _groupPanel.SetDisplayed(_selectedAccount && args.PageNum == 2);
-            _objectsPanel.SetDisplayed(_selectedAccount && args.PageNum == 6);
+            _imPanel.SetDisplayed(_selectedAccount && args.PageNum == Tabs.PageNum(_imPanel));
+            _groupPanel.SetDisplayed(_selectedAccount && args.PageNum == Tabs.PageNum(_groupPanel));
+            _objectsPanel.SetDisplayed(_selectedAccount && args.PageNum == Tabs.PageNum(_objectsPanel));
             GtkDispatch.Post(() =>
             {
                 if (_disposed) return;
-                if (Tabs.CurrentPage == 2) _groupPanel.StartLoading();
-                if (Tabs.CurrentPage == 3 && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
-                if (Tabs.CurrentPage == 4) _attachmentsPanel.StartLoading();
-                if (Tabs.CurrentPage == 5) _friendsPanel.StartLoading();
+                if (IsCurrentPage(_groupPanel)) _groupPanel.StartLoading();
+                if (IsCurrentPage(_inventoryPages) && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
+                if (IsCurrentPage(_attachmentsPanel)) _attachmentsPanel.StartLoading();
+                if (IsCurrentPage(_friendsPanel)) _friendsPanel.StartLoading();
             });
         };
         UpdateRestrictions();
@@ -135,15 +136,17 @@ internal sealed class SessionWidgets : IDisposable
     public void SetSelected(bool selected)
     {
         _selectedAccount = selected;
-        _imPanel.SetDisplayed(selected && Tabs.CurrentPage == 1);
-        _groupPanel.SetDisplayed(selected && Tabs.CurrentPage == 2);
-        _objectsPanel.SetDisplayed(selected && Tabs.CurrentPage == 6);
+        _imPanel.SetDisplayed(selected && IsCurrentPage(_imPanel));
+        _groupPanel.SetDisplayed(selected && IsCurrentPage(_groupPanel));
+        _objectsPanel.SetDisplayed(selected && IsCurrentPage(_objectsPanel));
     }
+
+    private bool IsCurrentPage(Widget page) => Tabs.CurrentPage == Tabs.PageNum(page);
 
     private void OpenInstantMessages(LibreMetaverse.UUID peerId)
     {
         if (!_imPanel.Open(peerId)) return;
-        Tabs.CurrentPage = 1;
+        Tabs.CurrentPage = Tabs.PageNum(_imPanel);
         _imPanel.SetDisplayed(_selectedAccount);
     }
 
@@ -152,7 +155,7 @@ internal sealed class SessionWidgets : IDisposable
         NotificationCategory.InstantMessages => _imPanel.IsDisplaying(notice.TargetId),
         NotificationCategory.GroupChats => _groupPanel.IsDisplaying(notice.TargetId),
         NotificationCategory.WornObjects => Tabs.CurrentPage == 0,
-        NotificationCategory.Friends => Tabs.CurrentPage == 5,
+        NotificationCategory.Friends => IsCurrentPage(_friendsPanel),
         _ => false
     };
 
@@ -258,7 +261,7 @@ internal sealed class SessionWidgets : IDisposable
         RefreshNearby();
         var redacted = _session.RedactText(_chatBuffer.Text);
         if (redacted != _chatBuffer.Text) _chatBuffer.Text = redacted;
-        if (Tabs.CurrentPage == 3 && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
+        if (IsCurrentPage(_inventoryPages) && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
     }
 
     public void Dispose()

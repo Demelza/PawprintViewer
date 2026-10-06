@@ -28,9 +28,9 @@ account and connection state.
   account has its name and square logout button on one line, a full-width
   location line below, and a balance line formatted like `69,420 L$`.
 - The central tab strip belongs to the selected account. Initial tabs are
-  Nearby Chat, IMs, Group Chats, Inventory, Attachments, Friends, Objects, and
-  Account Settings. Account Settings currently contains only the existing RLV
-  controls.
+  Nearby Chat, Friends, IMs, Group Chats, Inventory, Attachments, Objects, Map,
+  and Account Settings. Map is currently empty. Account Settings currently
+  contains only the existing RLV controls.
 - **Global Settings** is below the add-account button. Notification category
   switches there apply to every account and persist between runs.
 - The right pane always shows nearby avatars for the selected account, ordered

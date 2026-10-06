@@ -36,6 +36,8 @@ attempt; this version does not store credentials.
   send `testcommand on` on channel 9; signed channel numbers are accepted, and
   `/0 message` sends public chat. Channel commands respect RLV channel locks.
 - Account-specific logout and unread nearby-chat counts for background accounts.
+- Account tabs are ordered Nearby Chat, Friends, IMs, Group Chats, Inventory,
+  Attachments, Objects, Map, and Account Settings. Map is currently empty.
 - **Global Settings**, below **+ Add account**, controls silent desktop popups
   for IMs, Group Chats, Worn Objects, Menus, and friends going online/offline.
   All five are enabled initially. Changes apply to every account and are saved
