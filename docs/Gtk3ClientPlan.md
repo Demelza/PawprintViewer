@@ -92,6 +92,16 @@ distinguished using GTK's drag threshold, and no click teleports automatically.
 New selections or field edits cancel older lookups. Clicking water leaves no
 region selected. The map has no hover popup or failed-image overlay.
 
+Region labels appear at the bottom left as `Region - 9`. Counts sum the grid's
+map population clusters, with map block counts used until population arrives;
+this includes all avatars rather than only residents in the nearby list.
+Counts and visible region metadata refresh every 30 seconds. Labels
+use the system font on a translucent backing, shorten long names while keeping
+the count visible, and disappear when zoomed out too far to read. Partial regions
+keep their labels inside the visible portion. RLV nearby restrictions hide the
+counts while leaving permitted region names visible.
+The distance scale is at the top right to keep region labels clear.
+
 Connected simulators supply live coarse avatar coordinates. Other visible
 regions supply approximate population positions, which can represent groups.
 Population queries only run for the displayed account's map, have a limit of

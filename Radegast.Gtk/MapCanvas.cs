@@ -4,6 +4,11 @@ using Gtk;
 
 namespace Radegast.Gtk;
 
+internal sealed record MapRegionLabel(double X, double Y, string Name, int? AvatarCount, uint SizeX = 256, uint SizeY = 256)
+{
+    public string Text => AvatarCount is { } count ? $"{Name} - {count}" : Name;
+}
+
 /// <summary>A bounded tile cache and a CPU-drawn, north-up world map.</summary>
 internal sealed class MapCanvas : DrawingArea
 {
@@ -26,6 +31,7 @@ internal sealed class MapCanvas : DrawingArea
     private long _generation, _used;
     private (double X, double Y)? _avatar, _target;
     private IReadOnlyList<MapAvatarMarker> _people = Array.Empty<MapAvatarMarker>();
+    private IReadOnlyList<MapRegionLabel> _regions = Array.Empty<MapRegionLabel>();
 
     public WorldMapViewport Viewport { get; } = new();
     public event Action<double, double>? PointSelected;
@@ -82,6 +88,12 @@ internal sealed class MapCanvas : DrawingArea
     public void SetPeople(IReadOnlyList<MapAvatarMarker> people)
     {
         _people = people;
+        QueueDraw();
+    }
+
+    public void SetRegions(IReadOnlyList<MapRegionLabel> regions)
+    {
+        _regions = regions;
         QueueDraw();
     }
 
@@ -169,6 +181,7 @@ internal sealed class MapCanvas : DrawingArea
             }
         }
         DrawGrid(context, width, height);
+        foreach (var region in _regions) DrawRegionLabel(context, region, width, height);
         foreach (var person in _people) DrawPerson(context, person, width, height);
         if (_target is { } target) DrawMarker(context, target, width, height, false);
         if (_avatar is { } avatar) DrawMarker(context, avatar, width, height, true);
@@ -178,10 +191,11 @@ internal sealed class MapCanvas : DrawingArea
         if (meters * Viewport.Scale < 40) meters *= 2;
         context.SetSourceRGB(1, 1, 1);
         context.LineWidth = 2;
-        context.MoveTo(12, height - 14);
-        context.LineTo(12 + meters * Viewport.Scale, height - 14);
+        var scaleX = width - 12 - meters * Viewport.Scale;
+        context.MoveTo(scaleX, 32);
+        context.LineTo(width - 12, 32);
         context.Stroke();
-        Caption(context, $"{meters:0} m", 12, height - 38);
+        Caption(context, $"{meters:0} m", scaleX, 8);
         if (_server == null) Caption(context, "This grid did not provide a map tile service.", 8, 38);
         else if (_images.Count == 0) Caption(context, "Loading map…", 8, 38);
         return true;
@@ -218,6 +232,33 @@ internal sealed class MapCanvas : DrawingArea
         context.SetSourceRGB(avatar ? 0.3 : 1, avatar ? 1 : 0.75, avatar ? 0.4 : 0.15);
         context.Arc(x, y, avatar ? 4 : 6, 0, Math.PI * 2);
         if (avatar) context.Fill(); else { context.LineWidth = 2; context.Stroke(); }
+    }
+
+    private void DrawRegionLabel(Context context, MapRegionLabel region, int width, int height)
+    {
+        if (region.SizeX * Viewport.Scale < 64) return;
+        var (left, bottom) = Viewport.ToScreen(region.X, region.Y, width, height);
+        var (right, top) = Viewport.ToScreen(region.X + region.SizeX, region.Y + region.SizeY, width, height);
+        // Keep partially visible regions' labels inside their visible portion.
+        left = Math.Max(0, left);
+        bottom = Math.Min(height, bottom);
+        right = Math.Min(width, right);
+        top = Math.Max(0, top);
+        if (right - left < 64 || bottom <= top) return;
+        using var layout = CreatePangoLayout(region.Text);
+        layout.Width = (int)((right - left - 12) * Pango.Scale.PangoScale);
+        layout.Ellipsize = Pango.EllipsizeMode.Middle; // Preserve the count after long region names.
+        layout.SingleParagraphMode = true;
+        layout.GetPixelSize(out var textWidth, out var textHeight);
+        if (bottom - top < textHeight + 8) return;
+        var x = left + 6;
+        var y = bottom - textHeight - 6;
+        context.SetSourceRGBA(0, 0, 0, 0.65);
+        context.Rectangle(x - 2, y - 2, textWidth + 4, textHeight + 4);
+        context.Fill();
+        context.MoveTo(x, y);
+        context.SetSourceRGB(1, 1, 1);
+        Pango.CairoHelper.ShowLayout(context, layout);
     }
 
     private void DrawPerson(Context context, MapAvatarMarker person, int width, int height)

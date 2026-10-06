@@ -44,6 +44,11 @@ attempt; this version does not store credentials.
   fields; the entered Z altitude is retained. Dragging never selects a destination,
   and clicks never teleport automatically. Green marks your avatar, blue marks
   other avatars, and gold marks the destination. The map has no hover popup.
+  Each region has a bottom-left label such as `Region - 9`, using the grid's
+  total avatar count (including you). Labels follow the system font, shorten
+  long names while retaining the count, and hide when regions are too small
+  to read. Region names/counts refresh every 30 seconds while the tab is open;
+  RLV nearby-avatar restrictions hide the counts.
   Region and destination controls are on the left. The window's minimum width
   accommodates the square map and controls while retaining the 15% side panes.
 - Enter a region name and click the magnifier (or press Enter) to find that
