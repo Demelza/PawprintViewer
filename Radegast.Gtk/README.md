@@ -43,12 +43,17 @@ attempt; this version does not store credentials.
   `~/.config/pawprint-viewer/settings.json`). **Test notification** checks delivery.
   Linux desktop popups use the system's `libnotify` runtime and notification daemon.
 - Messages already being viewed in the foreground stay quiet. Background menus
-  notify without raising the viewer; clicking a notification selects its account
-  and opens the matching conversation, chat tab, or menu. Popups identify the
-  receiving account, honor RLV name/location restrictions, and replace earlier
-  popups for the same conversation. Initial friend statuses and RLV commands
+  notify without raising the viewer. Private IM popups show just the sender's
+  name, followed by a single-line preview shortened with an ellipsis. Previews
+  are measured with the system font, with a conservative width for Xfce popups;
+  final popup sizing is controlled by the desktop notification theme.
+  Popups have no action buttons. Other categories identify the receiving account.
+  Notifications honor RLV name/location restrictions and replace earlier popups
+  for the same conversation. Initial friend statuses and RLV commands
   do not produce notifications. Disabling a category or logging out clears its
   open popups; conversations and script menus continue to work normally.
+- `PawprintViewer.png` supplies the application/window icon and desktop popup
+  icon. It is copied alongside the executable for both builds and publishing.
 - Private IMs have a vertical conversation list on the left and the selected
   resident's transcript and message field on the right. Send with **Send** or
   Enter. Incoming messages create conversations without switching away from

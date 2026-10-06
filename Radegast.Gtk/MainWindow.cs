@@ -87,11 +87,7 @@ internal sealed class MainWindow : Window
     {
         if (_settingsWindow == null)
         {
-            _settingsWindow = new GlobalSettingsWindow(this, _globalSettings, _notifications, () =>
-            {
-                Present();
-                ShowGlobalSettings();
-            });
+            _settingsWindow = new GlobalSettingsWindow(this, _globalSettings, _notifications);
             _settingsWindow.Destroyed += (_, _) => _settingsWindow = null;
         }
         ShowChildWindow(_settingsWindow);
@@ -232,17 +228,6 @@ internal sealed class MainWindow : Window
         if (!_sessions.TryGetValue(session, out var widgets) || !session.IsConnected) return;
         var visible = _childWindows.HasFocus && (notice.Category == NotificationCategory.Menus ||
             (session == _selected && widgets.IsNotificationDisplayed(notice)));
-        _notifications.Notify(session, notice, visible, () => ActivateNotification(session, notice));
-    }
-
-    private void ActivateNotification(AccountSession session, AccountNotification notice)
-    {
-        if (!_sessions.TryGetValue(session, out var widgets) || !session.IsConnected) return;
-        SelectSession(session);
-        widgets.OpenNotification(notice);
-        // A notification click is a manual request to bring the viewer forward.
-        Present();
-        if (notice.Category == NotificationCategory.Menus && _scriptDialogs.TryGetValue(session, out var dialogs) &&
-            dialogs.LastOrDefault(dialog => dialog.ObjectId == notice.TargetId) is { } menu) ShowChildWindow(menu);
+        _notifications.Notify(session, notice, visible);
     }
 }

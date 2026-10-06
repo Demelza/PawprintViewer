@@ -43,7 +43,20 @@ var tests = new (string Name, Func<Task> Run)[]
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
         return Task.CompletedTask;
     }),
-    ("Notification switches apply to every account, suppress visible events and escape desktop markup", () =>
+    ("Notification previews collapse whitespace and truncate without splitting emoji or combining characters", () =>
+    {
+        int Measure(string text) => new System.Globalization.StringInfo(text).LengthInTextElements;
+        Check(NotificationPreview.Fit("  First\r\nsecond\tthird\0  ", 30, Measure) == "First second third",
+            "Multiline or whitespace-filled messages produced more than one preview line");
+        var preview = NotificationPreview.Fit("👩‍💻e\u0301👩‍💻e\u0301👩‍💻more", 5, Measure);
+        Check(preview == "👩‍💻e\u0301👩‍💻e\u0301…" && Measure(preview) == 5,
+            "Truncation split an emoji or combining-character sequence");
+        Check(NotificationPreview.Fit("Short message", 20, Measure) == "Short message" &&
+            NotificationPreview.Fit("Long message", 0, Measure) == string.Empty,
+            "Short previews were truncated or ellipsis overflowed the available width");
+        return Task.CompletedTask;
+    }),
+    ("Notification switches apply to every account, suppress visible events and keep IM titles to sender only", () =>
     {
         var directory = Path.Combine(Path.GetTempPath(), "pawprint-notification-policy-" + Guid.NewGuid().ToString("N"));
         try
@@ -55,18 +68,20 @@ var tests = new (string Name, Func<Task> Run)[]
             using var b = new AccountSession(action => action());
             foreach (var category in Enum.GetValues<NotificationCategory>())
             {
-                var notice = new AccountNotification(category, "Event", "<b>x & y</b>", UUID.Random());
-                controller.Notify(a, notice, false, () => { });
-                controller.Notify(b, notice, false, () => { });
-                controller.Notify(a, notice, true, () => { });
+                var notice = new AccountNotification(category, "Alice Resident", "<b>x & y</b>", UUID.Random());
+                controller.Notify(a, notice, false);
+                controller.Notify(b, notice, false);
+                controller.Notify(a, notice, true);
             }
-            Check(output.Shown.Count == 10 && output.Shown.All(notice => notice.Body == "&lt;b&gt;x &amp; y&lt;/b&gt;"),
-                "Visible events were notified or desktop markup was not escaped");
+            Check(output.Shown.Count == 10 && output.Shown.All(notice => notice.Body == "<b>x & y</b>"),
+                "Visible events were notified or text was escaped before measuring the preview");
+            Check(output.Shown.Where(notice => notice.Category == NotificationCategory.InstantMessages)
+                .All(notice => notice.Title == "Alice Resident"), "Private IM titles included the receiving account or an IM prefix");
             Check(output.Shown.Select(notice => notice.AccountId).Distinct().Count() == 2 &&
                 output.Shown.Select(notice => notice.Key).Distinct().Count() == 10, "Accounts shared notification identities");
             foreach (var category in Enum.GetValues<NotificationCategory>()) settings.Update(settings.Value.WithCategory(category, false));
             foreach (var category in Enum.GetValues<NotificationCategory>())
-                controller.Notify(a, new(category, "Disabled", "Message", UUID.Random()), false, () => { });
+                controller.Notify(a, new(category, "Disabled", "Message", UUID.Random()), false);
             Check(output.Shown.Count == 10 && Enum.GetValues<NotificationCategory>().All(category =>
                 output.Cleared.Any(clear => clear.Category == category)), "Disabled categories still notified or old popups were retained");
             controller.CloseAccount(a.Id);
@@ -94,7 +109,7 @@ var tests = new (string Name, Func<Task> Run)[]
             await ReceiveIm(f, f.GroupIm(group, resident, "Alice Resident", "group"));
             await ReceiveIm(f, f.GroupIm(group, f.Owner, "Me Resident", "own group"));
             await ReceiveIm(f, f.PrivateIm(resident, "Alice Resident", "typing", InstantMessageDialog.StartTyping));
-            Check(output.Count == 2 && output[0].Category == NotificationCategory.InstantMessages && output[0].TargetId == resident &&
+            Check(output.Count == 2 && output[0].Category == NotificationCategory.InstantMessages && output[0].Title == "Alice Resident" && output[0].TargetId == resident &&
                 output[1].Category == NotificationCategory.GroupChats && output[1].TargetId == group && output[1].Message == "Alice Resident: group",
                 "Notifications used transcript changes rather than incoming message events");
             await f.Command("@recvim=n");
@@ -129,7 +144,10 @@ var tests = new (string Name, Func<Task> Run)[]
     }),
     ("Friend notifications report changes once after the initial roster, without rights updates", async () =>
     {
-        using var a = new AccountSession(action => action());
+        // Match GTK's serialized dispatch: FriendsChanged precedes the
+        // notification within one callback, so wait for the whole callback.
+        var dispatch = new object();
+        using var a = new AccountSession(action => { lock (dispatch) action(); });
         using var f = new Fixture(a);
         var friend = f.Friend("Alice Resident");
         var output = new List<AccountNotification>();
@@ -139,7 +157,7 @@ var tests = new (string Name, Func<Task> Run)[]
         {
             await FriendsEvent(a, () => f.Receive(new OnlineNotificationPacket
                 { AgentBlock = new[] { new OnlineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
-            Check(output.Count == 0, "Initial online statuses produced notifications");
+            lock (dispatch) Check(output.Count == 0, "Initial online statuses produced notifications");
             typeof(FriendsManager).GetMethod("OnFriendsListReady", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .Invoke(a.Client.Friends, new object[] { new FriendsReadyEventArgs(1) });
             await FriendsEvent(a, () => f.Receive(new OfflineNotificationPacket
@@ -148,7 +166,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 { AgentBlock = new[] { new OfflineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
             await FriendsEvent(a, () => f.Receive(new OnlineNotificationPacket
                 { AgentBlock = new[] { new OnlineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
-            Check(output.Count == 2 && output[0].Title == "Alice Resident is offline" && output[1].Title == "Alice Resident is online" &&
+            lock (dispatch) Check(output.Count == 2 && output[0].Title == "Alice Resident is offline" && output[1].Title == "Alice Resident is online" &&
                 output.All(notice => notice.Category == NotificationCategory.Friends), "Presence transitions were duplicated or misclassified");
         }
         finally { SetConnected(a, false); }
@@ -170,7 +188,7 @@ var tests = new (string Name, Func<Task> Run)[]
             null, new ScriptDialogEventArgs("Secret Region: Alice Resident", "Furniture", UUID.Zero, UUID.Random(), "Alice", "Resident",
                 9, new List<string> { "OK" }, resident)
         });
-        Check(output.Count == 2 && output[0].Title == "IM from Resident" && output[1].Category == NotificationCategory.Menus &&
+        Check(output.Count == 2 && output[0].Title == "Resident" && output[1].Category == NotificationCategory.Menus &&
             output.All(notice => !notice.Message.Contains("Alice Resident") && !notice.Message.Contains("Secret Region") &&
                 !notice.Message.Contains("secondlife://")), "Notification content exposed RLV-hidden names or locations");
     }),
@@ -1539,12 +1557,12 @@ static async Task ReceiveIm(Fixture fixture, ImprovedInstantMessagePacket packet
 
 sealed class RecordingNotificationOutput : INotificationOutput
 {
-    public sealed record Notice(string Key, string AccountId, NotificationCategory Category, string Title, string Body, Action Activate);
+    public sealed record Notice(string Key, string AccountId, NotificationCategory Category, string Title, string Body);
     public List<Notice> Shown { get; } = new();
     public List<(string? AccountId, NotificationCategory? Category)> Cleared { get; } = new();
     public string? Error => null;
-    public void Show(string key, string accountId, NotificationCategory category, string title, string body, Action activate) =>
-        Shown.Add(new(key, accountId, category, title, body, activate));
+    public void Show(string key, string accountId, NotificationCategory category, string title, string body) =>
+        Shown.Add(new(key, accountId, category, title, body));
     public void Clear(string? accountId = null, NotificationCategory? category = null) => Cleared.Add((accountId, category));
     public void Dispose() { }
 }

@@ -156,26 +156,6 @@ internal sealed class SessionWidgets : IDisposable
         _ => false
     };
 
-    public void OpenNotification(AccountNotification notice)
-    {
-        switch (notice.Category)
-        {
-            case NotificationCategory.InstantMessages:
-                OpenInstantMessages(notice.TargetId);
-                break;
-            case NotificationCategory.GroupChats:
-                Tabs.CurrentPage = 2;
-                _groupPanel.Open(notice.TargetId);
-                break;
-            case NotificationCategory.WornObjects:
-                Tabs.CurrentPage = 0;
-                break;
-            case NotificationCategory.Friends:
-                Tabs.CurrentPage = 5;
-                break;
-        }
-    }
-
     private void OnConversationChanged(AccountSession account, ImConversation conversation)
     {
         var unread = account.UnreadInstantMessages;

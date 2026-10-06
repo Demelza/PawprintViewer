@@ -92,7 +92,7 @@ internal sealed partial class AccountSession
             conversation.Append(new ChatMessage(ChatConversation.MessageTime(message.Timestamp), message.Message, false));
             conversation.UnreadCount++;
             ConversationChanged?.Invoke(this, conversation);
-            Notify(NotificationCategory.InstantMessages, $"IM from {DisplayConversationName(message.FromAgentID)}",
+            Notify(NotificationCategory.InstantMessages, DisplayConversationName(message.FromAgentID),
                 message.Message, conversation.PeerId);
         });
     }

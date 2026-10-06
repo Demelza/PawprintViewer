@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Security;
 
 namespace Radegast.Gtk;
 
@@ -11,14 +12,12 @@ internal sealed class DesktopNotificationOutput : INotificationOutput
         public string Key { get; } = key;
         public string AccountId { get; } = accountId;
         public NotificationCategory Category { get; } = category;
-        public Action? Activate;
         public bool Closed;
         public bool Released;
     }
 
     private readonly Dictionary<string, Notice> _notices = new();
     private readonly Dictionary<IntPtr, Notice> _handles = new();
-    private readonly Native.ActionCallback _action;
     private readonly Native.ClosedCallback _closed;
     private readonly bool _ready;
     private bool _disposed;
@@ -27,7 +26,6 @@ internal sealed class DesktopNotificationOutput : INotificationOutput
 
     public DesktopNotificationOutput()
     {
-        _action = OnAction;
         _closed = OnClosed;
         try
         {
@@ -40,39 +38,54 @@ internal sealed class DesktopNotificationOutput : INotificationOutput
         }
     }
 
-    public void Show(string key, string accountId, NotificationCategory category, string title, string body, Action activate)
+    public void Show(string key, string accountId, NotificationCategory category, string title, string body)
     {
         if (_disposed || !_ready) return;
+        body = FormatBody(body);
         if (_notices.TryGetValue(key, out var notice) && notice.Closed) { Release(notice); notice = null; }
         if (notice == null)
         {
             // A conversation replaces its earlier popup; bound unrelated popups as well.
             if (_notices.Count >= 32) Close(_notices.Values.First());
-            notice = new(Native.notify_notification_new(title, body, "dialog-information"), key, accountId, category);
+            notice = new(Native.notify_notification_new(title, body, Program.IconPath), key, accountId, category);
             if (notice.Handle == IntPtr.Zero) return;
             _notices[key] = notice;
             _handles[notice.Handle] = notice;
             Native.g_signal_connect_data(notice.Handle, "closed", _closed, IntPtr.Zero, IntPtr.Zero, 0);
-            Native.notify_notification_add_action(notice.Handle, "default", "Open", _action, IntPtr.Zero, IntPtr.Zero);
             Native.notify_notification_set_timeout(notice.Handle, 7000);
             // Notifications are visual only, even if the desktop normally plays sounds.
             var silent = Native.g_variant_ref_sink(Native.g_variant_new_boolean(1));
             Native.notify_notification_set_hint(notice.Handle, "suppress-sound", silent);
             Native.g_variant_unref(silent);
         }
-        else Native.notify_notification_update(notice.Handle, title, body, "dialog-information");
-        notice.Activate = activate;
+        else Native.notify_notification_update(notice.Handle, title, body, Program.IconPath);
         var shown = Native.notify_notification_show(notice.Handle, out var error) != 0;
         _desktopError = shown ? null : "Desktop notifications are unavailable. " + ErrorText(error);
         if (error != IntPtr.Zero) Native.g_error_free(error);
         if (!shown) Release(notice);
     }
 
-    private void OnAction(IntPtr handle, IntPtr action, IntPtr data)
+    internal static string FormatBody(string body)
     {
-        if (_disposed || !_handles.TryGetValue(handle, out var notice) || notice.Activate is not { } activate) return;
-        // Leave the native callback before changing windows or releasing the notification.
-        GtkDispatch.Post(() => { if (!_disposed) activate(); });
+        using var label = new global::Gtk.Label();
+        const string sample = "abcdefghijklmnopqrstuvwxyz0123456789";
+        using var layout = label.CreatePangoLayout(sample);
+        layout.GetPixelSize(out var sampleWidth, out _);
+        var display = Gdk.Display.Default;
+        var monitorWidth = Enumerable.Range(0, display.NMonitors)
+            .Select(index => display.GetMonitor(index).Geometry.Width).DefaultIfEmpty(960).Min();
+        // Xfce caps its text labels at monitor-width / 30 characters. Leave
+        // room for theme differences, and keep larger-screen popups compact.
+        var columns = Math.Max(1, monitorWidth / 30 - 6);
+        var width = Math.Min(320, sampleWidth * columns / sample.Length);
+        var preview = NotificationPreview.Fit(body, width, text =>
+        {
+            layout.SetText(text);
+            layout.GetPixelSize(out var pixels, out _);
+            return pixels;
+        });
+        // Measure plain text first; escaped markup must never inflate its width.
+        return SecurityElement.Escape(preview) ?? string.Empty;
     }
 
     private void OnClosed(IntPtr handle, IntPtr data)
@@ -120,7 +133,6 @@ internal sealed class DesktopNotificationOutput : INotificationOutput
     private static class Native
     {
         [StructLayout(LayoutKind.Sequential)] public struct GError { public uint Domain; public int Code; public IntPtr Message; }
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void ActionCallback(IntPtr notice, IntPtr action, IntPtr data);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void ClosedCallback(IntPtr notice, IntPtr data);
         [DllImport("libnotify.so.4", CallingConvention = CallingConvention.Cdecl)] public static extern int notify_init([MarshalAs(UnmanagedType.LPUTF8Str)] string app);
         [DllImport("libnotify.so.4", CallingConvention = CallingConvention.Cdecl)] public static extern void notify_uninit();
@@ -128,7 +140,6 @@ internal sealed class DesktopNotificationOutput : INotificationOutput
         [DllImport("libnotify.so.4", CallingConvention = CallingConvention.Cdecl)] public static extern int notify_notification_update(IntPtr notice, [MarshalAs(UnmanagedType.LPUTF8Str)] string title, [MarshalAs(UnmanagedType.LPUTF8Str)] string body, [MarshalAs(UnmanagedType.LPUTF8Str)] string icon);
         [DllImport("libnotify.so.4", CallingConvention = CallingConvention.Cdecl)] public static extern int notify_notification_show(IntPtr notice, out IntPtr error);
         [DllImport("libnotify.so.4", CallingConvention = CallingConvention.Cdecl)] public static extern int notify_notification_close(IntPtr notice, out IntPtr error);
-        [DllImport("libnotify.so.4", CallingConvention = CallingConvention.Cdecl)] public static extern void notify_notification_add_action(IntPtr notice, [MarshalAs(UnmanagedType.LPUTF8Str)] string action, [MarshalAs(UnmanagedType.LPUTF8Str)] string label, ActionCallback callback, IntPtr data, IntPtr free);
         [DllImport("libnotify.so.4", CallingConvention = CallingConvention.Cdecl)] public static extern void notify_notification_set_timeout(IntPtr notice, int timeout);
         [DllImport("libnotify.so.4", CallingConvention = CallingConvention.Cdecl)] public static extern void notify_notification_set_hint(IntPtr notice, [MarshalAs(UnmanagedType.LPUTF8Str)] string key, IntPtr value);
         [DllImport("libgobject-2.0.so.0", CallingConvention = CallingConvention.Cdecl)] public static extern void g_object_unref(IntPtr handle);

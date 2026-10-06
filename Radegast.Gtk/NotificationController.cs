@@ -1,11 +1,9 @@
-using System.Security;
-
 namespace Radegast.Gtk;
 
 internal interface INotificationOutput : IDisposable
 {
     string? Error { get; }
-    void Show(string key, string accountId, NotificationCategory category, string title, string body, Action activate);
+    void Show(string key, string accountId, NotificationCategory category, string title, string body);
     void Clear(string? accountId = null, NotificationCategory? category = null);
 }
 
@@ -24,19 +22,19 @@ internal sealed class NotificationController : IDisposable
         settings.Changed += OnSettingsChanged;
     }
 
-    public void Notify(AccountSession account, AccountNotification notice, bool alreadyVisible, Action activate)
+    public void Notify(AccountSession account, AccountNotification notice, bool alreadyVisible)
     {
         if (_disposed || alreadyVisible || !_settings.Value.IsEnabled(notice.Category)) return;
+        var title = notice.Category == NotificationCategory.InstantMessages ? notice.Title : $"{account.Name} — {notice.Title}";
         _output.Show($"{account.Id}/{notice.Category}/{notice.TargetId}", account.Id, notice.Category,
-            PlainText($"{account.Name} — {notice.Title}", 160),
-            SecurityElement.Escape(PlainText(notice.Message, 400)) ?? string.Empty, activate);
+            PlainText(title, 160), notice.Message);
     }
 
-    public void Test(Action activate)
+    public void Test()
     {
         if (_disposed) return;
         _output.Show("settings-test", string.Empty, NotificationCategory.Menus, Program.ViewerName,
-            "Your notification settings are active.", activate);
+            "Your notification settings are active.");
     }
 
     private static string PlainText(string text, int limit)

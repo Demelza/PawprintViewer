@@ -53,8 +53,8 @@ account and connection state.
 - There is no 3D scene, avatar renderer, map renderer, or GPU viewport.
 - There is no in-world sound, parcel stream, or voice UI. The client must not
   initialize the core FMOD sound engine. Notifications use silent desktop popups.
-- Optional desktop notifications identify the receiving account. Their click
-  action selects that account and the relevant conversation or notice.
+- Optional desktop notifications show private IM senders or identify the
+  receiving account for other categories. Popups have no action buttons.
 - Image and asset previews load only when their content is opened.
 
 ## Implementation boundaries
@@ -106,11 +106,15 @@ and RLV commands are excluded. Message content follows RLV receive and display
 rules. A test button provides a manual desktop notification.
 
 The GTK main loop delivers silent libnotify popups without raising the viewer.
-Events already visible in the foreground stay quiet. Notifications identify the
-account; clicking one selects that account and its conversation, chat tab, or
-existing menu. Each conversation replaces its previous popup, and the number of
-open popups is bounded. Disabling a category, disconnecting, or logging out closes
-the affected popups and removes stale activation callbacks.
+Events already visible in the foreground stay quiet. Private IM notifications
+show only the sender's name above a single-line message preview. Text is measured
+with the system font and truncated at complete Unicode text elements, leaving
+room for the desktop theme's popup sizing. Other categories retain the account
+name. Popups have no action buttons and use `PawprintViewer.png`, which also
+provides the default GTK window icon and is included in builds and publishing.
+Each conversation replaces its previous popup, and the number of open popups
+is bounded. Disabling a category, disconnecting, or logging out closes the
+affected popups.
 
 ## Objects checkpoint
 

@@ -8,7 +8,7 @@ internal sealed class GlobalSettingsWindow : Window
     private readonly Label _status = new() { Xalign = 0, Wrap = true };
     private bool _closing;
 
-    public GlobalSettingsWindow(Window parent, GlobalSettings settings, NotificationController notifications, System.Action activate)
+    public GlobalSettingsWindow(Window parent, GlobalSettings settings, NotificationController notifications)
         : base("Global Settings — " + Program.ViewerName)
     {
         _settings = settings;
@@ -32,7 +32,7 @@ internal sealed class GlobalSettingsWindow : Window
         var test = new Button("Test notification");
         test.Clicked += (_, _) =>
         {
-            notifications.Test(activate);
+            notifications.Test();
             _status.Text = notifications.Error ?? "Test notification sent.";
         };
         var dismiss = new Button("Dismiss");
