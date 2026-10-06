@@ -44,6 +44,15 @@ attempt; this version does not store credentials.
 - IMs request offline delivery and retrieve stored offline messages after login.
   Private messages keep channel prefixes such as `/9` as literal text; channel
   commands belong in Nearby Chat.
+- Group Chats uses the same full-height layout as IMs. Existing group memberships
+  appear alphabetically on the left; select a group to join its chat, then use
+  **Send** or Enter. **Refresh groups** reloads memberships. Incoming group
+  messages go to their own transcripts and show the sending resident's name.
+  Each account and group keeps its own history, selection, draft, and unread count.
+  Viewing a group marks only that conversation read. Joining waits for server
+  confirmation; failed joins can be retried by selecting the group again.
+  Rejected messages restore the draft when the message field is still empty.
+  Group chats and private IMs remain separate, including their unread tab counts.
 - Friends are listed with online residents first, alphabetically within each
   group, and a small online indicator. Names and online status update as replies
   arrive; friendship additions/removals also update the list.
@@ -94,8 +103,9 @@ command queue, shared inventory, and restrictions.
 
 Supported integrations include attachment and wearable locks, shared-folder
 locks, forced wear/remove actions, `#RLV` inventory and worn-state queries,
-chat and emote restrictions/redirection, private IM start/send/receive restrictions
-and resident exceptions, touch restrictions, hidden inventory,
+chat and emote restrictions/redirection, private IM start/send/receive restrictions,
+group chat send/receive restrictions and resident/group exceptions, touch
+restrictions, hidden inventory,
 names and location, forced sit/stand/rotation/teleport, active group changes,
 teleport offer restrictions/automatic acceptance, and script permission rules.
 
@@ -127,7 +137,7 @@ attachment loading during region changes does not immediately clear locks.
 
 This implements the protocol features connected to the current GTK interface,
 not every RLV/RLVa feature. Camera, rendered environment, viewer debug settings,
-content previews/editing, sharing, group chat, and teleport
+content previews/editing, sharing, and teleport
 requests are unavailable. The unavailable behaviors are listed through
 `@getblacklist` / `@versionnumbl`; they do not start a renderer or audio engine.
 An in-world RLV relay attachment can forward commands to the viewer. A built-in
@@ -146,8 +156,8 @@ For furniture, use two seats with different animations and test both an RLV
 furniture switch and standing. Check from another viewer that the old pose
 stops, the new pose plays, and attachment/AO animations remain active.
 
-The Group Chats tab currently shows a placeholder. Group and conference IMs
-are not shown as private conversations.
+Conference chats, group notices, and group membership/role administration are
+not implemented. Group and conference messages do not become private conversations.
 Inventory item content editors, previews, rez actions, desktop
 notifications, and notification sounds are also pending.
 The [GTK3 client plan](../docs/Gtk3ClientPlan.md) tracks the intended scope.

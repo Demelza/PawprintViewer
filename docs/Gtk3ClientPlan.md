@@ -71,8 +71,9 @@ applied.
 ## RLV checkpoint
 
 The RLV tab shows each account's active restrictions and enable switch.
-Inventory, attachment touch, nearby chat, private IMs, and displayed names/location now use
-that account's permissions. The shared command engine handles inventory queries
+Inventory, attachment touch, nearby chat, private/group conversations, and
+displayed names/location now use that account's permissions. The shared command
+engine handles inventory queries
 and forced outfit, sit, teleport, rotation, and group operations. Script
 permission requests have separate GTK prompts. Furniture animations are cleaned
 up on stand and direct seat changes using their source objects, preserving
@@ -123,7 +124,33 @@ Private IM start/send/receive restrictions and resident exceptions use the
 account's RLV permissions. Restricted sends keep the draft, blocked incoming
 messages are not displayed, and hidden names/location are redacted in the UI.
 Group/conference messages, script messages, and other IM protocol events do not
-become private conversations. The Group Chats tab remains pending.
+become private conversations.
+
+## Group chat checkpoint
+
+Group Chats shares the IM tab's layout and fills the available height. The left
+list contains the account's existing group memberships, ordered alphabetically.
+Selecting a group requests its chat session and waits for server confirmation
+before enabling Send; Enter also sends. Refresh groups reloads the membership
+list. Failed or timed-out joins can be retried by selecting the group again.
+
+Incoming messages use their group session IDs and retain the sending resident's
+name. Messages arriving before membership loading completes wait for the roster,
+so the initial group message is retained and conference sessions remain separate.
+Each account/group has an independent history, selection, draft, and unread count.
+The conversation buttons, Group Chats tab, and account rail show unread counts;
+only the selected account's displayed group is marked read. State stays in memory
+for the current login. Group membership changes disable sending to former groups
+while preserving their message history.
+
+Sending uses the group session protocol and avoids displaying the server's echo
+as a second copy of a sent message. Long messages split at Unicode boundaries.
+Expired sessions report server rejection and rejoin; messages are not automatically
+resent. A rejected message returns to an empty composer so the user can resend it
+after joining. Group chat send/receive rules use RLV group UUID/name exceptions,
+including `allgroups`; sender names and locations follow the display restrictions.
+Conference chats, group notices, and group membership/role administration remain
+outside this checkpoint.
 
 ## First working checkpoint
 

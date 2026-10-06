@@ -6,11 +6,242 @@ using LibreMetaverse;
 using LibreMetaverse.Appearance;
 using LibreMetaverse.Packets;
 using LibreMetaverse.RLV;
+using LibreMetaverse.Interfaces;
+using LibreMetaverse.Messages.Linden;
 using Radegast.Gtk;
 
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Group rosters load and sort independently for each account", () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var b = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        using var g = new Fixture(b);
+        var id = UUID.Random();
+        var packets = f.CapturePackets();
+        SetConnected(a, true);
+        SetConnected(b, true);
+        try
+        {
+            a.RequestGroups();
+            a.RequestGroups();
+            Check(packets().OfType<AgentDataUpdateRequestPacket>().Single().AgentData.AgentID == f.Owner,
+                "Group membership requests used the wrong account or were repeated");
+            f.Groups((id, "Zebra Group"), (UUID.Random(), "alpha Group"));
+            g.Groups((id, "Other Account Group"));
+            Check(a.GroupsLoaded && a.GroupConversations.Select(chat => chat.Name).SequenceEqual(new[] { "alpha Group", "Zebra Group" }) &&
+                b.GroupConversations.Single().Name == "Other Account Group", "Group names or ordering leaked across accounts");
+            f.Groups((id, "Renamed Group"));
+            Check(a.GroupConversations.Single().Name == "Renamed Group" && b.GroupConversations.Single().Name == "Other Account Group",
+                "A roster update did not replace the current membership correctly");
+        }
+        finally { SetConnected(a, false); SetConnected(b, false); }
+        return Task.CompletedTask;
+    }),
+    ("Early group messages wait for membership and conference sessions stay separate", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var group = UUID.Random();
+        var sender = UUID.Random();
+        f.CapturePackets();
+        SetConnected(a, true);
+        try
+        {
+            await ReceiveIm(f, f.GroupIm(group, sender, "Alice Resident", "early group message"));
+            await ReceiveIm(f, f.GroupIm(UUID.Random(), sender, "Alice Resident", "conference"));
+            Check(a.GroupConversations.Count == 0 && a.Conversations.Count == 0, "Unclassified sessions became conversations");
+            f.Groups((group, "Test Group"));
+            var chat = a.GroupConversations.Single();
+            Check(chat.Messages.Single().Text == "early group message" && chat.Messages[0].SenderName == "Alice Resident" &&
+                chat.State == GroupChatState.Joined && chat.UnreadCount == 1, "The first group message was lost while membership loaded");
+            await ReceiveIm(f, f.PrivateIm(sender, "Alice Resident", "private"));
+            await ReceiveIm(f, f.GroupIm(group, sender, "Alice Resident", "group again"));
+            var legacy = f.GroupIm(group, sender, "Alice Resident", "legacy group");
+            legacy.MessageBlock.Dialog = (byte)InstantMessageDialog.MessageFromAgent;
+            await ReceiveIm(f, legacy);
+            Check(chat.Messages.Count == 3 && a.Conversations.Single().Messages.Single().Text == "private",
+                "Group and private IM routing was mixed");
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Group chat sends wait for confirmed joining and use the group session protocol", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var b = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        using var g = new Fixture(b);
+        var group = UUID.Random();
+        var packets = f.CapturePackets();
+        var otherPackets = g.CapturePackets();
+        SetConnected(a, true);
+        try
+        {
+            f.Groups((group, "Test Group"));
+            var chat = a.OpenGroupChat(group);
+            a.OpenGroupChat(group);
+            chat.Draft = "/9 group message";
+            Check(chat.State == GroupChatState.Joining && !a.CanSendGroupMessage(group, chat.Draft), "Sending was enabled before joining");
+            ExpectRejected(() => a.SendGroupMessage(group, chat.Draft));
+            var join = packets().OfType<ImprovedInstantMessagePacket>().Single();
+            Check(join.MessageBlock.Dialog == (byte)InstantMessageDialog.SessionGroupStart && join.MessageBlock.ToAgentID == group &&
+                join.AgentData.AgentID == f.Owner, "Joining used the wrong protocol or account");
+            f.GroupJoin(group, true);
+            a.SendGroupMessage(group, chat.Draft);
+            var sent = packets().OfType<ImprovedInstantMessagePacket>().Single();
+            Check(sent.Header.Reliable && sent.AgentData.AgentID == f.Owner && sent.MessageBlock.ToAgentID == group && sent.MessageBlock.ID == group &&
+                sent.MessageBlock.Dialog == (byte)InstantMessageDialog.SessionSend && Utils.BytesToString(sent.MessageBlock.Message) == "/9 group message",
+                "A group message became a private IM, nearby channel command or wrong session");
+            Check(chat.Messages.Single().Outgoing && chat.Draft == "" && !otherPackets().Any(), "The group draft/history or originating account is wrong");
+            await ReceiveIm(f, f.GroupIm(group, f.Owner, "Self", "/9 group message"));
+            Check(chat.Messages.Count == 1 && chat.UnreadCount == 0, "The server's own-message echo duplicated the sent line");
+            await ReceiveIm(f, f.GroupIm(group, UUID.Random(), "Other Resident", "/9 group message"));
+            Check(chat.Messages.Count == 2 && chat.UnreadCount == 1, "Another resident's identical message was discarded");
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Failed joins, lost membership and disconnects preserve group drafts and prevent sends", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var group = UUID.Random();
+        var packets = f.CapturePackets();
+        SetConnected(a, true);
+        try
+        {
+            f.Groups((group, "Test Group"));
+            var chat = a.OpenGroupChat(group);
+            chat.Draft = "keep this draft";
+            f.GroupJoin(group, false);
+            Check(chat.State == GroupChatState.Failed && a.GroupChatStatus(group, chat.Draft).Contains("retry"), "A failed join was not reported");
+            ExpectRejected(() => a.SendGroupMessage(group, chat.Draft));
+            Check(chat.Draft == "keep this draft" && chat.Messages.Count == 0, "A failed send erased a draft or added a sent line");
+            a.OpenGroupChat(group);
+            Check(packets().OfType<ImprovedInstantMessagePacket>().Count(packet => packet.MessageBlock.Dialog == (byte)InstantMessageDialog.SessionGroupStart) == 2,
+                "A failed group join could not be retried");
+            f.GroupJoin(group, true);
+            await ReceiveIm(f, f.GroupIm(group, UUID.Random(), "Resident", "history"));
+            f.Groups();
+            Check(a.GroupConversations.Single().Messages.Count == 1 && !a.CanSendGroupMessage(group, chat.Draft), "Lost membership discarded history or allowed sending");
+            ExpectRejected(() => a.OpenGroupChat(group));
+            ExpectRejected(() => a.SendGroupMessage(group, chat.Draft));
+            SetConnected(a, false);
+            ExpectRejected(() => a.SendGroupMessage(group, chat.Draft));
+            Check(chat.Draft == "keep this draft", "Disconnecting lost the unsent group draft");
+            Check(!packets().OfType<ImprovedInstantMessagePacket>().Any(packet => packet.MessageBlock.Dialog == (byte)InstantMessageDialog.SessionSend),
+                "A rejected send reached the group");
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Long Unicode group messages split safely and suppress only their own echoed parts", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var group = UUID.Random();
+        var packets = f.CapturePackets();
+        SetConnected(a, true);
+        try
+        {
+            f.Groups((group, "Test Group"));
+            f.GroupJoin(group, true);
+            var text = string.Concat(Enumerable.Repeat("日本語😀", 350));
+            a.SendGroupMessage(group, text);
+            var sent = packets().OfType<ImprovedInstantMessagePacket>().ToArray();
+            var parts = sent.Select(packet => Utils.BytesToString(packet.MessageBlock.Message)).ToArray();
+            Check(parts.Length > 1 && string.Concat(parts) == text && parts.All(part => System.Text.Encoding.UTF8.GetByteCount(part) <= AgentManager.MaxChatMessageSize),
+                "Group packet splitting corrupted or truncated Unicode text");
+            foreach (var part in parts) await ReceiveIm(f, f.GroupIm(group, f.Owner, "Self", part));
+            Check(a.GroupConversations.Single().Messages.Single().Text == text && a.UnreadGroupMessages == 0,
+                "Echoed packet chunks duplicated the locally displayed message");
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Group unread messages, sender names and drafts remain isolated from private IMs and accounts", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var b = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        using var g = new Fixture(b);
+        var first = UUID.Random();
+        var second = UUID.Random();
+        var sender = UUID.Random();
+        SetConnected(a, true);
+        SetConnected(b, true);
+        try
+        {
+            f.Groups((first, "First"), (second, "Second"));
+            g.Groups((first, "Other First"));
+            await ReceiveIm(f, f.GroupIm(first, sender, "Alice Resident", "one"));
+            await ReceiveIm(f, f.GroupIm(second, sender, "Alice Resident", "two"));
+            await ReceiveIm(g, g.GroupIm(first, sender, "Alice Resident", "other account"));
+            await ReceiveIm(f, f.PrivateIm(sender, "Alice Resident", "private"));
+            var chat = a.GroupConversations.Single(chat => chat.Id == first);
+            chat.Draft = "draft";
+            a.MarkGroupChatRead(first);
+            Check(a.UnreadGroupMessages == 1 && b.UnreadGroupMessages == 1 && a.UnreadInstantMessages == 1 && chat.Draft == "draft" &&
+                chat.Messages.Single().Text == "one", "Reading a group affected other groups, private IMs, drafts or accounts");
+            await f.Command("@shownames=n");
+            Check(a.DisplayGroupSender(chat.Messages[0]) == "Resident", "The group transcript exposed a restricted sender name");
+        }
+        finally { SetConnected(a, false); SetConnected(b, false); }
+    }),
+    ("RLV group sending and receiving use group exceptions and keep private IM restrictions separate", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var group = UUID.Random();
+        var peer = UUID.Random();
+        var packets = f.CapturePackets();
+        SetConnected(a, true);
+        try
+        {
+            f.Groups((group, "Test Group"));
+            f.GroupJoin(group, true);
+            var chat = a.GroupConversations.Single();
+            chat.Draft = "keep";
+            await f.Command("@sendimto:allgroups=n,recvimfrom:allgroups=n");
+            ExpectRejected(() => a.SendGroupMessage(group, chat.Draft));
+            await ReceiveIm(f, f.GroupIm(group, peer, "Resident", "blocked group"));
+            await ReceiveIm(f, f.PrivateIm(peer, "Resident", "allowed private"));
+            Check(chat.Messages.Count == 0 && chat.Draft == "keep" && a.Conversations.Single().Messages.Count == 1,
+                "Group-only restrictions affected private IMs or admitted blocked group messages");
+            Check(!packets().OfType<ImprovedInstantMessagePacket>().Any(), "A restricted group send reached the network");
+            await f.Command("@clear,sendim=n,sendim:allgroups=add,recvim=n,recvim:allgroups=add");
+            a.SendGroupMessage(group, "allowed group");
+            ExpectRejected(() => a.SendInstantMessage(peer, "blocked private"));
+            await ReceiveIm(f, f.GroupIm(group, peer, "Resident", "allowed incoming group"));
+            await ReceiveIm(f, f.PrivateIm(peer, "Resident", "blocked private"));
+            Check(chat.Messages.Count == 2 && a.Conversations.Single().Messages.Count == 1, "Group exceptions did not enforce the correct receive context");
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Expired group sessions report failed sends and rejoin before sending again", () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var group = UUID.Random();
+        var packets = f.CapturePackets();
+        SetConnected(a, true);
+        try
+        {
+            f.Groups((group, "Test Group"));
+            f.GroupJoin(group, true);
+            a.SendGroupMessage(group, "sent once");
+            packets();
+            f.Caps("ChatterBoxSessionEventReply", new ChatterboxSessionEventReplyMessage { SessionID = group, Success = false });
+            Check(a.GroupConversations.Single().State == GroupChatState.Joining && !a.CanSendGroupMessage(group, "retry") &&
+                a.GroupChatStatus(group, "retry").Contains("rejected") && a.GroupConversations.Single().Draft == "sent once",
+                "An expired group session stayed sendable, hid the rejection or lost the rejected draft");
+            Check(packets().OfType<ImprovedInstantMessagePacket>().Single().MessageBlock.Dialog == (byte)InstantMessageDialog.SessionGroupStart,
+                "The library's session recovery did not request a rejoin or resent a message automatically");
+            f.GroupJoin(group, true);
+            Check(a.CanSendGroupMessage(group, "retry"), "The rejoined session could not send again");
+        }
+        finally { SetConnected(a, false); }
+        return Task.CompletedTask;
+    }),
     ("Private messages use the selected account, resident session and offline delivery", () =>
     {
         using var session = new AccountSession(action => action());
@@ -1000,6 +1231,31 @@ sealed class Fixture : IDisposable
         MessageBlock = { FromAgentName = Utils.StringToBytes(name), Message = Utils.StringToBytes(text),
             ToAgentID = Owner, ID = sender ^ Owner, Dialog = (byte)dialog, BinaryBucket = Array.Empty<byte>() }
     };
+
+    public ImprovedInstantMessagePacket GroupIm(UUID group, UUID sender, string name, string text)
+    {
+        var packet = PrivateIm(sender, name, text, InstantMessageDialog.SessionSend);
+        packet.MessageBlock.ID = group;
+        packet.MessageBlock.BinaryBucket = Utils.StringToBytes("Group session");
+        return packet;
+    }
+
+    public void Caps(string name, IMessage message)
+    {
+        var events = typeof(NetworkManager).GetField("CapsEvents", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Client.Network)!;
+        events.GetType().GetMethod("RaiseEvent", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(events, new object[] { name, message, Simulator });
+    }
+
+    public void Groups(params (UUID Id, string Name)[] groups) => Caps("AgentGroupDataUpdate", new AgentGroupDataUpdateMessage
+    {
+        AgentID = Owner, AvatarID = Owner,
+        GroupDataBlock = groups.Select(group => new AgentGroupDataUpdateMessage.GroupData
+            { GroupID = group.Id, GroupName = group.Name }).ToArray(),
+        NewGroupDataBlock = groups.Select(_ => new AgentGroupDataUpdateMessage.NewGroupData()).ToArray()
+    });
+
+    public void GroupJoin(UUID group, bool success, UUID? sessionId = null) => Caps("ChatterBoxSessionStartReply",
+        new ChatterBoxSessionStartReplyMessage { SessionID = sessionId ?? group, TempSessionID = group, SessionName = "Group session", Success = success });
 
     public Func<List<Packet>> CapturePackets()
     {

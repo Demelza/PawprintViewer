@@ -64,6 +64,7 @@ internal sealed partial class AccountSession : IDisposable
         Client.Avatars.UUIDNameReply += OnNameReply;
         Client.Network.RegisterLoginResponseCallback(OnLoginResponse);
         InitializeFriends();
+        InitializeGroupChats();
     }
 
     public void Login(string username, string password, Grid grid, StartLocationType startLocation, string mfaToken = "")
@@ -201,6 +202,7 @@ internal sealed partial class AccountSession : IDisposable
     {
         if (_disposed) return;
         ReceivePrivateInstantMessage(e.IM);
+        ReceiveGroupInstantMessage(e.IM);
         if (_disposed || !Rlv.Enabled || e.IM.Dialog != InstantMessageDialog.RequestTeleport) return;
         var permissions = Rlv.Service.Permissions;
         if (!permissions.CanTPLure(e.IM.FromAgentID.Guid))
@@ -222,6 +224,7 @@ internal sealed partial class AccountSession : IDisposable
             if (status == LoginStatus.Success)
             {
                 Name = Client.Self.Name;
+                RequestGroups();
                 _ = RetrieveOfflineInstantMessagesAsync();
             }
             StateChanged?.Invoke(this);
@@ -260,6 +263,7 @@ internal sealed partial class AccountSession : IDisposable
         Rlv.SetEnabled(false);
         if (enabled) Rlv.SetEnabled(true);
         _nearby.Clear();
+        ResetGroupChats();
         lock (_nameLock) _requestedFriendNames.Clear();
         StateChanged?.Invoke(this);
         NearbyChanged?.Invoke(this);
@@ -374,6 +378,7 @@ internal sealed partial class AccountSession : IDisposable
         if (_disposed) return;
         _disposed = true;
         StopFriends();
+        StopGroupChats();
         Net.ClientLoginStatus -= OnLoginProgress;
         Net.ClientDisconnected -= OnDisconnected;
         Net.ClientLoggedOut -= OnLoggedOut;

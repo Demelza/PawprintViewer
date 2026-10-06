@@ -79,6 +79,8 @@ internal sealed class MainWindow : Window
         session.StateChanged += OnStateChanged;
         session.ChatLine += OnChatLine;
         session.ConversationChanged += OnConversationChanged;
+        session.GroupConversationChanged += OnGroupConversationChanged;
+        session.GroupsChanged += OnStateChanged;
         session.NearbyChanged += OnNearbyChanged;
         session.ScriptDialogReceived += OnScriptDialogReceived;
         session.PermissionRequested += OnPermissionRequested;
@@ -109,6 +111,8 @@ internal sealed class MainWindow : Window
         session.StateChanged -= OnStateChanged;
         session.ChatLine -= OnChatLine;
         session.ConversationChanged -= OnConversationChanged;
+        session.GroupConversationChanged -= OnGroupConversationChanged;
+        session.GroupsChanged -= OnStateChanged;
         session.NearbyChanged -= OnNearbyChanged;
         session.ScriptDialogReceived -= OnScriptDialogReceived;
         session.PermissionRequested -= OnPermissionRequested;
@@ -155,6 +159,11 @@ internal sealed class MainWindow : Window
     }
 
     private void OnConversationChanged(AccountSession session, ImConversation conversation)
+    {
+        if (_sessions.TryGetValue(session, out var widgets)) widgets.UpdateAccountLabel(session == _selected);
+    }
+
+    private void OnGroupConversationChanged(AccountSession session, GroupConversation conversation)
     {
         if (_sessions.TryGetValue(session, out var widgets)) widgets.UpdateAccountLabel(session == _selected);
     }

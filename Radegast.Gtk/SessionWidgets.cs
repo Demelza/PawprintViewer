@@ -15,6 +15,8 @@ internal sealed class SessionWidgets : IDisposable
     private readonly FriendsPanel _friendsPanel;
     private readonly InstantMessagesPanel _imPanel;
     private readonly Label _imTabLabel = new("IMs");
+    private readonly GroupChatsPanel _groupPanel;
+    private readonly Label _groupTabLabel = new("Group Chats");
     private bool _selectedAccount;
     private readonly RlvPanel _rlvPanel;
     private readonly Stack _inventoryPages = new();
@@ -91,7 +93,8 @@ internal sealed class SessionWidgets : IDisposable
 
         _imPanel = new InstantMessagesPanel(session);
         Tabs.AppendPage(_imPanel, _imTabLabel);
-        AddPendingTab("Group Chats");
+        _groupPanel = new GroupChatsPanel(session);
+        Tabs.AppendPage(_groupPanel, _groupTabLabel);
         _inventoryPanel = new InventoryPanel(session);
         _inventoryPages.AddNamed(_inventoryPanel, "inventory");
         _inventoryPages.AddNamed(new Label("Inventory is hidden by an RLV restriction."), "restricted");
@@ -105,14 +108,18 @@ internal sealed class SessionWidgets : IDisposable
         Tabs.AppendPage(_rlvPanel, new Label("RLV"));
         session.Rlv.Changed += UpdateRestrictions;
         session.ConversationChanged += OnConversationChanged;
+        session.GroupConversationChanged += OnGroupConversationChanged;
         if (session.Conversations.FirstOrDefault() is { } conversation) OnConversationChanged(session, conversation);
+        if (session.GroupConversations.FirstOrDefault() is { } group) OnGroupConversationChanged(session, group);
         Tabs.SwitchPage += (_, args) =>
         {
             if (_disposed) return;
             _imPanel.SetDisplayed(_selectedAccount && args.PageNum == 1);
+            _groupPanel.SetDisplayed(_selectedAccount && args.PageNum == 2);
             GtkDispatch.Post(() =>
             {
                 if (_disposed) return;
+                if (Tabs.CurrentPage == 2) _groupPanel.StartLoading();
                 if (Tabs.CurrentPage == 3 && _inventoryPages.VisibleChildName == "inventory") _inventoryPanel.StartLoading();
                 if (Tabs.CurrentPage == 4) _attachmentsPanel.StartLoading();
                 if (Tabs.CurrentPage == 5) _friendsPanel.StartLoading();
@@ -125,6 +132,7 @@ internal sealed class SessionWidgets : IDisposable
     {
         _selectedAccount = selected;
         _imPanel.SetDisplayed(selected && Tabs.CurrentPage == 1);
+        _groupPanel.SetDisplayed(selected && Tabs.CurrentPage == 2);
     }
 
     private void OpenInstantMessages(LibreMetaverse.UUID peerId)
@@ -140,10 +148,10 @@ internal sealed class SessionWidgets : IDisposable
         _imTabLabel.Text = unread > 0 ? $"IMs ({unread})" : "IMs";
     }
 
-    private void AddPendingTab(string title)
+    private void OnGroupConversationChanged(AccountSession account, GroupConversation conversation)
     {
-        var label = new Label($"{title} will be added in a later build.");
-        Tabs.AppendPage(label, new Label(title));
+        var unread = account.UnreadGroupMessages;
+        _groupTabLabel.Text = unread > 0 ? $"Group Chats ({unread})" : "Group Chats";
     }
 
     private void SendChat()
@@ -192,7 +200,7 @@ internal sealed class SessionWidgets : IDisposable
 
     public void UpdateAccountLabel(bool selected)
     {
-        var totalUnread = UnreadCount + _session.UnreadInstantMessages;
+        var totalUnread = UnreadCount + _session.UnreadInstantMessages + _session.UnreadGroupMessages;
         var unread = totalUnread > 0 ? $" ({totalUnread})" : string.Empty;
         AccountButton.Label = $"{(selected ? "› " : "")}{_session.Name}{unread}";
         // Gtk.Button replaces its child label when its text changes.
@@ -244,8 +252,10 @@ internal sealed class SessionWidgets : IDisposable
         _disposed = true;
         _session.Rlv.Changed -= UpdateRestrictions;
         _session.ConversationChanged -= OnConversationChanged;
+        _session.GroupConversationChanged -= OnGroupConversationChanged;
         _friendsPanel.ImRequested -= OpenInstantMessages;
         _imPanel.Stop();
+        _groupPanel.Stop();
         _rlvPanel.Stop();
         _inventoryPanel.Stop();
         _attachmentsPanel.Stop();

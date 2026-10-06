@@ -2,17 +2,10 @@ using LibreMetaverse;
 
 namespace Radegast.Gtk;
 
-internal sealed record PrivateMessage(DateTime Timestamp, string Text, bool Outgoing);
-
-internal sealed class ImConversation(UUID peerId, UUID sessionId)
+internal sealed class ImConversation(UUID peerId, UUID sessionId) : ChatConversation(peerId)
 {
-    private readonly List<PrivateMessage> _messages = new();
-    public UUID PeerId { get; } = peerId;
+    public UUID PeerId => Id;
     public UUID SessionId { get; } = sessionId;
-    public IReadOnlyList<PrivateMessage> Messages => _messages;
-    public string Draft { get; set; } = string.Empty;
-    public int UnreadCount { get; internal set; }
-    internal void Append(PrivateMessage message) => _messages.Add(message);
 }
 
 internal sealed partial class AccountSession
@@ -68,7 +61,7 @@ internal sealed partial class AccountSession
         // The default avatar IM API requests offline delivery as well as online delivery.
         // Chat channel prefixes are deliberately left as literal private-message text.
         Client.Self.InstantMessage(peerId, message, conversation.SessionId);
-        conversation.Append(new PrivateMessage(DateTime.Now, message, true));
+        conversation.Append(new ChatMessage(DateTime.Now, message, true));
         conversation.Draft = string.Empty;
         ConversationChanged?.Invoke(this, conversation);
     }
@@ -92,17 +85,11 @@ internal sealed partial class AccountSession
         _post(() =>
         {
             if (_disposed || (Rlv.Enabled && !Rlv.Service.Permissions.CanReceiveIM(message.Message, message.FromAgentID.Guid))) return;
+            if (FindGroupSession(message.IMSessionID) is { } group && _groups.ContainsKey(group.Id)) return;
             if (!string.IsNullOrWhiteSpace(message.FromAgentName))
                 lock (_nameLock) _names[message.FromAgentID] = message.FromAgentName;
             var conversation = GetConversation(message.FromAgentID);
-            var timestamp = message.Timestamp;
-            // LibreMetaverse 3.1.5's UDP handler constructs DateTime from Unix seconds
-            // as ticks. Accept already decoded dates as well.
-            if (timestamp.Year < 2000)
-                timestamp = timestamp.Ticks is > 0 and <= uint.MaxValue
-                    ? DateTimeOffset.FromUnixTimeSeconds(timestamp.Ticks).LocalDateTime : DateTime.Now;
-            else if (timestamp.Kind == DateTimeKind.Utc) timestamp = timestamp.ToLocalTime();
-            conversation.Append(new PrivateMessage(timestamp, message.Message, false));
+            conversation.Append(new ChatMessage(ChatConversation.MessageTime(message.Timestamp), message.Message, false));
             conversation.UnreadCount++;
             ConversationChanged?.Invoke(this, conversation);
         });
