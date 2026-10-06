@@ -13,6 +13,7 @@ internal sealed class SessionWidgets : IDisposable
     private readonly InventoryPanel _inventoryPanel;
     private readonly AttachmentsPanel _attachmentsPanel;
     private readonly FriendsPanel _friendsPanel;
+    private readonly ObjectsPanel _objectsPanel;
     private readonly InstantMessagesPanel _imPanel;
     private readonly Label _imTabLabel = new("IMs");
     private readonly GroupChatsPanel _groupPanel;
@@ -104,6 +105,8 @@ internal sealed class SessionWidgets : IDisposable
         _friendsPanel = new FriendsPanel(session);
         _friendsPanel.ImRequested += OpenInstantMessages;
         Tabs.AppendPage(_friendsPanel, new Label("Friends"));
+        _objectsPanel = new ObjectsPanel(session);
+        Tabs.AppendPage(_objectsPanel, new Label("Objects"));
         _rlvPanel = new RlvPanel(session.Rlv);
         Tabs.AppendPage(_rlvPanel, new Label("RLV"));
         session.Rlv.Changed += UpdateRestrictions;
@@ -116,6 +119,7 @@ internal sealed class SessionWidgets : IDisposable
             if (_disposed) return;
             _imPanel.SetDisplayed(_selectedAccount && args.PageNum == 1);
             _groupPanel.SetDisplayed(_selectedAccount && args.PageNum == 2);
+            _objectsPanel.SetDisplayed(_selectedAccount && args.PageNum == 6);
             GtkDispatch.Post(() =>
             {
                 if (_disposed) return;
@@ -133,6 +137,7 @@ internal sealed class SessionWidgets : IDisposable
         _selectedAccount = selected;
         _imPanel.SetDisplayed(selected && Tabs.CurrentPage == 1);
         _groupPanel.SetDisplayed(selected && Tabs.CurrentPage == 2);
+        _objectsPanel.SetDisplayed(selected && Tabs.CurrentPage == 6);
     }
 
     private void OpenInstantMessages(LibreMetaverse.UUID peerId)
@@ -260,5 +265,6 @@ internal sealed class SessionWidgets : IDisposable
         _inventoryPanel.Stop();
         _attachmentsPanel.Stop();
         _friendsPanel.Stop();
+        _objectsPanel.Stop();
     }
 }

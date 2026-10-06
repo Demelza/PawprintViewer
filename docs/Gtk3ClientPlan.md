@@ -28,7 +28,7 @@ account and connection state.
   account has its name and square logout button on one line, a full-width
   location line below, and a balance line formatted like `69,420 L$`.
 - The central tab strip belongs to the selected account. Initial tabs are
-  Nearby Chat, IMs, Group Chats, Inventory, Attachments, and Friends.
+  Nearby Chat, IMs, Group Chats, Inventory, Attachments, Friends, Objects, and RLV.
 - The right pane always shows nearby avatars for the selected account, ordered
   by distance. It updates after movement, teleport, or account selection.
 - The account rail and nearby pane each use 15% of the window width, with 70%
@@ -91,6 +91,20 @@ other shared folders. Diagnostics show commands, the shared root, and channel
 replies. See the
 [GTK README](../Radegast.Gtk/README.md#rlv--rlva) for supported features,
 limitations, and the regression-check command.
+
+## Objects checkpoint
+
+The Objects tab shows each rezzed object once within a 50 m sphere around the
+selected avatar, ordered by distance. Attachments and linked child prims are
+excluded. Names load in batches with bounded retries, and the full-height list
+updates while that account's Objects tab is visible. Connected neighboring
+regions use global coordinates so objects near a border have the correct range.
+
+Each row has a **Sit** button to the left of its name and distance. A **Stand**
+button above the list becomes available when seated. Actions recheck the live
+object and RLV sit, unsit, and sit-distance restrictions. Sit requests wait for
+the appropriate object response and avatar seat update; logout cancels pending
+requests. Standing and switching furniture use the existing animation cleanup.
 
 ## Friends checkpoint
 

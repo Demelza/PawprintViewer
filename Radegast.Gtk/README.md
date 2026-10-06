@@ -79,6 +79,14 @@ attempt; this version does not store credentials.
   the server's inventory response before success is shown.
 - The Attachments tab lists equipped objects and their attachment points, with
   a Touch button for touchable objects and a disabled button for other objects.
+- The Objects tab lists rezzed objects within a 50 m radius, nearest first,
+  with their names, distances, and a **Sit** button on the left. Linked objects
+  appear once; attachments are excluded. The list updates while displayed,
+  including objects in connected neighboring regions. **Refresh** retries
+  missing names. **Stand** becomes available while seated, including ground
+  sits. Sit/stand actions respect RLV locks and sitting-distance restrictions;
+  sitting waits for server confirmation, and standing uses the existing
+  furniture animation cleanup.
 - Script menus and text prompts opened by touched objects appear in their own
   compact windows; button and text replies go to the correct account.
 - New menus and permission prompts wait while another application has focus.

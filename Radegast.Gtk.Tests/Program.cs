@@ -13,6 +13,192 @@ using Radegast.Gtk;
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Nearby objects use a 50 m sphere, exclude attachments and linked children, and stay account-specific", () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var b = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        using var g = new Fixture(b);
+        SetConnected(a, true);
+        SetConnected(b, true);
+        SetPosition(a, new Vector3(100, 100, 20));
+        SetPosition(b, new Vector3(100, 100, 20));
+        try
+        {
+            var near = f.Prim(200);
+            near.Position = new Vector3(101, 100, 20);
+            near.Properties = new Primitive.ObjectProperties { ObjectID = near.ID, Name = "Chair" };
+            var edge = f.Prim(201);
+            edge.Position = new Vector3(100, 130, 60); // Exactly 50 m in three dimensions.
+            f.Prim(202).Position = new Vector3(100, 100, 70.01f);
+            f.Prim(203, near.LocalID).Position = Vector3.Zero;
+            var attached = f.Prim(204);
+            attached.Position = near.Position;
+            attached.IsAttachment = true;
+            var avatar = f.Prim(205);
+            avatar.Position = near.Position;
+            avatar.PrimData.PCode = PCode.Avatar;
+            g.Prim(210).Position = near.Position;
+            var objects = a.GetNearbyObjects();
+            Check(objects.Select(item => item.Id).SequenceEqual(new[] { near.ID, edge.ID }),
+                "The radius, root filtering, distance order or account isolation was incorrect");
+            Check(objects[0].Name == "Chair" && objects[0].HasName && !objects[1].HasName,
+                "Known names or loading placeholders were lost");
+            Check(b.GetNearbyObjects().Single().LocalId == 210, "Another account's objects leaked into this list");
+            SetPosition(a, new Vector3(200, 100, 20));
+            Check(a.GetNearbyObjects().Count == 0, "Moving the avatar did not update the radius");
+        }
+        finally { SetConnected(a, false); SetConnected(b, false); }
+        return Task.CompletedTask;
+    }),
+    ("Nearby objects include connected neighbours using global region coordinates", () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        f.Simulator.Handle = Utils.UIntsToLong(1024, 1024);
+        using var neighbour = new Simulator(a.Client, new IPEndPoint(IPAddress.Loopback, 13001), Utils.UIntsToLong(1280, 1024));
+        typeof(Simulator).GetField("connected", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(neighbour, true);
+        a.Client.Network.Simulators.Add(neighbour);
+        var prim = new Primitive { ID = UUID.Random(), LocalID = 200, Position = new Vector3(10, 100, 20) };
+        neighbour.ObjectsPrimitives[prim.LocalID] = prim;
+        SetPosition(a, new Vector3(250, 100, 20));
+        SetConnected(a, true);
+        try
+        {
+            var item = a.GetNearbyObjects().Single();
+            Check(item.Id == prim.ID && item.Distance == 16 && item.Simulator == neighbour,
+                "Objects across a region boundary used local coordinates or the wrong simulator");
+            Check(a.ObjectSitError(item) == null, "A connected neighbouring object could not be selected");
+            typeof(Simulator).GetField("connected", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(neighbour, false);
+            Check(a.GetNearbyObjects().Count == 0 && a.ObjectSitError(item) != null,
+                "A disconnected neighbouring region still exposed usable objects");
+        }
+        finally { SetConnected(a, false); a.Client.Network.Simulators.Remove(neighbour); }
+        return Task.CompletedTask;
+    }),
+    ("Manual sitting and standing enforce live objects, RLV locks and sitting distance", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var packets = f.CapturePackets();
+        var prim = f.Prim(200);
+        prim.Position = new Vector3(10, 0, 0);
+        SetConnected(a, true);
+        try
+        {
+            var item = a.GetNearbyObjects().Single();
+            Check(a.ObjectSitError(item) == null && a.StandError != null, "Initial sit/stand state was incorrect");
+            await f.Command("@sit=n");
+            Check(a.ObjectSitError(item) != null, "A sit restriction was ignored");
+            await f.Command("@sit=y,sittp=n");
+            Check(a.ObjectSitError(item) != null, "The sit teleport distance restriction was ignored");
+            prim.Position = new Vector3(1, 0, 0);
+            Check(a.ObjectSitError(item) == null, "Sitting within the permitted distance was blocked");
+            await f.Command("@sittp=y");
+            var oldSeat = f.Prim(201);
+            f.ChangeSeat(oldSeat.LocalID);
+            await f.Command("@unsit=n");
+            Check(a.ObjectSitError(item) != null && a.StandError != null, "A seat lock allowed sitting elsewhere or standing");
+            ExpectRejected(a.StandUp);
+            Check(packets().Count == 0, "A blocked sit or stand sent movement packets");
+            await f.Command("@unsit=y");
+            f.ChangeSeat(0);
+            prim.Position = new Vector3(51, 0, 0);
+            Check(a.ObjectSitError(item) != null, "A stale nearby row allowed sitting outside the radius");
+            prim.Position = new Vector3(1, 0, 0);
+            prim.ID = UUID.Random();
+            Check(a.ObjectSitError(item) != null, "Reusing a local ID allowed sitting on a different object");
+            f.Simulator.ObjectsPrimitives.TryRemove(prim.LocalID, out _);
+            Check(a.ObjectSitError(item) != null, "A deleted object remained usable");
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Manual sit waits for its object's reply, accepts linked seats and confirms the avatar's seat", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var packets = f.CapturePackets();
+        var chair = f.Prim(200);
+        chair.Position = new Vector3(2, 0, 0);
+        var seat = f.Prim(201, chair.LocalID);
+        SetConnected(a, true);
+        using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        try
+        {
+            var item = a.GetNearbyObjects().Single();
+            var sit = a.SitOnObjectAsync(item, cancel.Token);
+            Check(packets().OfType<AgentRequestSitPacket>().Single().TargetObject.TargetID == chair.ID && !sit.IsCompleted,
+                "The sit request used the wrong object or finished before the server replied");
+            f.Receive(new AvatarSitResponsePacket { SitObject = { ID = UUID.Random() } });
+            await Task.Delay(40);
+            Check(!sit.IsCompleted && !packets().OfType<AgentSitPacket>().Any(), "An unrelated object's sit response was accepted");
+            f.Receive(new AvatarSitResponsePacket { SitObject = { ID = seat.ID } });
+            var sent = new List<Packet>();
+            await WaitUntil(() => { sent.AddRange(packets()); return sent.OfType<AgentSitPacket>().Any(); });
+            Check(!sit.IsCompleted, "Sit success was reported before the avatar's seat update");
+            f.ChangeSeat(seat.LocalID);
+            await sit;
+            Check(a.IsSitting && a.StandError == null && a.ObjectSitError(item) != null,
+                "The seated state or stand availability did not update");
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Canceled manual sit requests cannot seat the avatar on a later reply", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var packets = f.CapturePackets();
+        var chair = f.Prim(200);
+        chair.Position = new Vector3(2, 0, 0);
+        SetConnected(a, true);
+        try
+        {
+            var item = a.GetNearbyObjects().Single();
+            using var cancel = new CancellationTokenSource();
+            var sit = a.SitOnObjectAsync(item, cancel.Token);
+            packets();
+            cancel.Cancel();
+            try { await sit; throw new InvalidOperationException("Canceled sit request succeeded"); }
+            catch (OperationCanceledException) { }
+            f.Receive(new AvatarSitResponsePacket { SitObject = { ID = chair.ID } });
+            await Task.Delay(40);
+            Check(!packets().OfType<AgentSitPacket>().Any(), "A canceled request sent a late sit packet");
+            using var retryCancel = new CancellationTokenSource();
+            var retry = a.SitOnObjectAsync(item, retryCancel.Token);
+            Check(packets().OfType<AgentRequestSitPacket>().Count() == 1, "Cancellation left sitting permanently busy");
+            retryCancel.Cancel();
+            try { await retry; } catch (OperationCanceledException) { }
+        }
+        finally { SetConnected(a, false); }
+    }),
+    ("Manual stand sends the stand control and cleans old furniture animations on confirmation", async () =>
+    {
+        using var a = new AccountSession(action => action());
+        using var f = new Fixture(a);
+        var packets = f.CapturePackets();
+        var chair = f.Prim(200);
+        var seat = f.Prim(201, chair.LocalID);
+        var animation = UUID.Random();
+        var attachmentAnimation = UUID.Random();
+        SetConnected(a, true);
+        a.Client.Settings.Agent.SendUpdates = true;
+        f.Simulator.AgentMovementComplete = true;
+        try
+        {
+            f.ChangeSeat(seat.LocalID);
+            f.Animations((animation, 1, chair.ID), (attachmentAnimation, 1, f.Attachment.ID));
+            await Task.Delay(40);
+            a.StandUp();
+            Check(packets().OfType<AgentUpdatePacket>().Any(packet =>
+                (packet.AgentData.ControlFlags & (uint)AgentManager.ControlFlags.AGENT_CONTROL_STAND_UP) != 0),
+                "Stand did not send the stand control");
+            f.ChangeSeat(0);
+            var stopped = packets().OfType<AgentAnimationPacket>().SelectMany(packet => packet.AnimationList).ToArray();
+            Check(!a.IsSitting && a.StandError != null && stopped.Any(block => block.AnimID == animation && !block.StartAnim) &&
+                stopped.All(block => block.AnimID != attachmentAnimation), "Stand did not clean only the furniture's animations");
+        }
+        finally { SetConnected(a, false); }
+    }),
     ("Group rosters load and sort independently for each account", () =>
     {
         using var a = new AccountSession(action => action());
@@ -1076,6 +1262,15 @@ static void Check(bool condition, string message)
 
 static void SetConnected(AccountSession session, bool connected) =>
     typeof(Radegast.NetCom).GetProperty(nameof(Radegast.NetCom.IsLoggedIn))!.SetValue(session.Net, connected);
+
+static void SetPosition(AccountSession session, Vector3 position) =>
+    typeof(AgentManager).GetField("relativePosition", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(session.Client.Self, position);
+
+static async Task WaitUntil(Func<bool> condition)
+{
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+    while (!condition()) await Task.Delay(10, timeout.Token);
+}
 
 static void ExpectRejected(Action action)
 {
