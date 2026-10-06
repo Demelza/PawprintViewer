@@ -40,14 +40,7 @@ internal sealed class LoginWindow : Window
         Modal = true;
         DestroyWithParent = true;
         SetDefaultSize(430, 280);
-        Destroyed += (_, _) =>
-        {
-            _closed = true;
-            CancelPasswordLookup();
-            _submittedCredentials = null;
-            _pending?.Dispose();
-            _pending = null;
-        };
+        Destroyed += (_, _) => ClearPendingLogin();
 
         using (var manager = new GridManager())
         {
@@ -91,7 +84,12 @@ internal sealed class LoginWindow : Window
 
         var actions = new Box(Orientation.Horizontal, 8);
         var cancel = new Button("Cancel");
-        cancel.Clicked += (_, _) => Destroy();
+        cancel.Clicked += (_, _) => CloseLogin();
+        DeleteEvent += (_, args) =>
+        {
+            args.RetVal = true;
+            CloseLogin();
+        };
         _loginButton.Clicked += (_, _) => BeginLogin();
         _password.Activated += (_, _) => BeginLogin();
         _mfa.Activated += (_, _) => BeginLogin();
@@ -268,6 +266,7 @@ internal sealed class LoginWindow : Window
 
     private void OnLoginProgress(AccountSession session, LoginStatus status, string message, string reason)
     {
+        if (_closed) return;
         if (status == LoginStatus.Success)
         {
             session.LoginProgress -= OnLoginProgress;
@@ -276,7 +275,7 @@ internal sealed class LoginWindow : Window
             _submittedCredentials = null;
             _pending = null;
             LoginSucceeded?.Invoke(session);
-            Destroy();
+            CloseLogin();
             _ = ReportSaveResultAsync(session, saving);
             return;
         }
@@ -294,6 +293,27 @@ internal sealed class LoginWindow : Window
 
         _status.Text = status == LoginStatus.Failed ? $"Login failed: {message}" : message;
         if (status == LoginStatus.Failed) SetLoginBusy(false);
+    }
+
+    public void CloseLogin()
+    {
+        if (_closed) return;
+        ClearPendingLogin();
+        // Keep the native top-level object alive until GtkSharp releases its toggle reference.
+        Dispose();
+    }
+
+    private void ClearPendingLogin()
+    {
+        _closed = true;
+        CancelPasswordLookup();
+        _submittedCredentials = null;
+        if (_pending != null)
+        {
+            _pending.LoginProgress -= OnLoginProgress;
+            _pending.Dispose();
+            _pending = null;
+        }
     }
 
     private async Task ReportSaveResultAsync(AccountSession session, Task saving)

@@ -249,6 +249,15 @@ avatar-marker drawing through GTK callbacks:
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --map-scroll-smoke
 ```
 
+The login window's native GTK check also requires a display. It simulates
+successful logins, asynchronous password saving, Cancel and window-manager
+closure, and forces garbage collection to catch native reference errors.
+It uses temporary account metadata and a fake keyring; no grid login is needed:
+
+```sh
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --login-smoke
+```
+
 For a live check, use an RLV attachment to test detection, lock/unlock and
 detachment through both the actual item and an inventory link. Then check its
 shared inventory menu and test two accounts with different restrictions.

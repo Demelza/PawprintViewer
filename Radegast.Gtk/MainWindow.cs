@@ -33,7 +33,7 @@ internal sealed class MainWindow : Window
             _notifications.Dispose();
             foreach (var session in _sessions.Keys.ToArray())
                 RemoveSession(session);
-            _loginWindow?.Destroy();
+            _loginWindow?.CloseLogin();
             Application.Quit();
         };
 

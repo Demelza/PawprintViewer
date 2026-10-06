@@ -97,6 +97,12 @@ account. Keyring failures preserve manual login and report password-save errors
 in Nearby Chat. Existing account lists survive restarts, and malformed metadata
 does not prevent entering a new account manually.
 
+Successful login, Cancel, window-manager close and viewer shutdown share one
+login-popup cleanup path. It disposes the GTK window while its native reference
+is still valid, cancels password lookups and ignores late login callbacks.
+Credential saves may finish after the popup closes. The native GTK login check
+exercises these lifetimes with garbage collection enabled.
+
 ## Map checkpoint
 
 The Map tab has a square world map on the right, occupying the full tab height,
