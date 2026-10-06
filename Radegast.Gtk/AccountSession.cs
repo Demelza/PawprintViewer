@@ -84,6 +84,7 @@ internal sealed partial class AccountSession : IDisposable
         Net.AgreeToTos = true;
         Name = Net.LoginOptions.FullName;
         Status = "Connecting…";
+        _friendPresence.Reset();
         StateChanged?.Invoke(this);
         Net.Login();
     }
@@ -221,6 +222,7 @@ internal sealed partial class AccountSession : IDisposable
                 status == LoginStatus.Failed ? "Login failed" : message;
             if (status == LoginStatus.Success)
             {
+                _friendPresence.Connected();
                 Name = Client.Self.Name;
                 RequestGroups();
                 _ = RetrieveOfflineInstantMessagesAsync();
@@ -265,8 +267,7 @@ internal sealed partial class AccountSession : IDisposable
         _mapAvatarPositions.Clear();
         ResetTeleportOffers();
         ResetGroupChats();
-        _friendPresence.Clear();
-        _friendPresenceReady = false;
+        _friendPresence.Reset();
         lock (_nameLock) _requestedFriendNames.Clear();
         StateChanged?.Invoke(this);
         NearbyChanged?.Invoke(this);

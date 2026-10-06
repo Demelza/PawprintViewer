@@ -102,6 +102,9 @@ and a password-save failure is reported in that account's Nearby Chat.
   for the same conversation. Initial friend statuses and RLV commands
   do not produce notifications. Disabling a category or logging out clears its
   open popups; conversations and script menus continue to work normally.
+  First presence replies during the first 10 seconds after login establish a
+  silent baseline. Further changes for an observed friend notify immediately;
+  friends initially offline can produce login notifications after that period.
 - Incoming teleport offers open an account-specific window saying
   **[sender] wants to teleport you to their location.** **Accept** starts the
   offered teleport; **Refuse** or closing the window declines it. Background
@@ -123,8 +126,9 @@ and a password-save failure is reported in that account's Nearby Chat.
   Private messages keep channel prefixes such as `/9` as literal text; channel
   commands belong in Nearby Chat.
 - Avatar profile URLs such as `secondlife:///app/agent/<uuid>/about` appear as
-  clickable resident names in Nearby Chat, IMs and Group Chats. Unknown names
-  load automatically for the originating account and update existing messages.
+  clickable resident names in Nearby Chat, IMs, Group Chats and both profile
+  text tabs. Unknown names load automatically for the originating account and
+  update existing text.
   Clicking opens a GTK profile window with Second Life/First Life text, birth
   date and **Dismiss**. Names and profile access respect RLV name restrictions.
 - Group Chats uses the same full-height layout as IMs. Existing group memberships
@@ -263,8 +267,9 @@ It uses temporary account metadata and a fake keyring; no grid login is needed:
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --login-smoke
 ```
 
-The native chat-link check tests name resolution in all three chat tabs, clicks
-through GTK events, profile replies, text selection and window cleanup. It uses
+The native chat-link check tests name resolution in all three chat tabs and both
+profile text tabs, clicks through GTK events, delayed profile/name replies, text
+selection and window cleanup. It uses
 simulated packets and does not connect to a grid:
 
 ```sh

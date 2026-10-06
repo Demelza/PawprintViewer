@@ -194,6 +194,12 @@ apply immediately. Initial friend presence, outgoing chat, typing, group echoes,
 and RLV commands are excluded. Message content follows RLV receive and display
 rules. A test button provides a manual desktop notification.
 
+The login buddy list contains no online statuses. First status replies within
+10 seconds of connecting establish a silent baseline, including multiple initial
+packets. Later transitions for an observed friend notify immediately. After that
+settling period, an initially offline friend's first login also notifies. Each
+account/login keeps its own baseline; logout resets it.
+
 The GTK main loop delivers silent libnotify popups without raising the viewer.
 Events already visible in the foreground stay quiet. IM, group, and object/menu
 notifications show only the sender, group, or object name above the message
@@ -251,6 +257,8 @@ sent to the grid retains its original contents.
 
 Clicking a name opens a read-only GTK profile window for that resident and
 originating account, containing Second Life/First Life text and birth date.
+Both profile text tabs use the same clickable-name renderer, including delayed
+name resolution, paragraph layout, theme colors and RLV redaction.
 Profile retrieval uses UDP with the AgentProfile capability when available.
 The first successful reply supplies the fields. Dismissal/logout cancels pending
 requests and ignores late replies. These windows use the existing presentation

@@ -4,11 +4,11 @@ using LibreMetaverse;
 
 namespace Radegast.Gtk;
 
-/// <summary>Plain chat text with account-specific, clickable avatar profile names.</summary>
+/// <summary>Read-only text with account-specific, clickable avatar profile names.</summary>
 internal sealed class ChatHistoryView : TextView
 {
     private readonly AccountSession _session;
-    private readonly List<string> _lines = new();
+    private readonly List<(string Text, bool NewLine)> _lines = new();
     private readonly Dictionary<UUID, TextTag> _links = new();
     private readonly Dictionary<UUID, string> _linkNames = new();
     private Cursor? _hand;
@@ -33,8 +33,16 @@ internal sealed class ChatHistoryView : TextView
     public void AppendLine(string text)
     {
         if (_stopped) return;
-        _lines.Add(text);
-        InsertLine(text);
+        _lines.Add((text, true));
+        InsertText(text, true);
+    }
+
+    public void SetText(string text)
+    {
+        if (_stopped) return;
+        Clear();
+        _lines.Add((text, false));
+        InsertText(text, false);
     }
 
     public void Clear()
@@ -58,7 +66,7 @@ internal sealed class ChatHistoryView : TextView
         _linkNames.Clear();
     }
 
-    private void InsertLine(string text)
+    private void InsertText(string text, bool newLine)
     {
         foreach (var span in _session.FormatChatText(text))
         {
@@ -81,6 +89,7 @@ internal sealed class ChatHistoryView : TextView
                 _linkNames[span.AvatarId] = span.Text;
             }
         }
+        if (!newLine) return;
         var lastOffset = Buffer.CharCount;
         var last = Buffer.EndIter;
         Buffer.Insert(ref last, Environment.NewLine);
@@ -109,7 +118,7 @@ internal sealed class ChatHistoryView : TextView
         var selected = Buffer.GetSelectionBounds(out var start, out var end);
         var startOffset = start.Offset; var endOffset = end.Offset;
         ClearBuffer();
-        foreach (var line in _lines) InsertLine(line);
+        foreach (var (text, newLine) in _lines) InsertText(text, newLine);
         if (selected) Buffer.SelectRange(Buffer.GetIterAtOffset(Math.Min(startOffset, Buffer.CharCount)),
             Buffer.GetIterAtOffset(Math.Min(endOffset, Buffer.CharCount)));
         var revision = _revision;

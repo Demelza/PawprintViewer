@@ -8,8 +8,7 @@ internal sealed record FriendResident(UUID Id, string Name, bool IsOnline);
 internal sealed partial class AccountSession
 {
     private readonly HashSet<UUID> _requestedFriendNames = new();
-    private readonly Dictionary<UUID, bool> _friendPresence = new();
-    private bool _friendPresenceReady;
+    private readonly FriendPresenceTracker _friendPresence = new();
 
     public event Action<AccountSession>? FriendsChanged;
 
@@ -110,9 +109,7 @@ internal sealed partial class AccountSession
         _post(() =>
         {
             if (_disposed) return;
-            _friendPresence.Clear();
-            foreach (var (id, online) in statuses) _friendPresence[id] = online;
-            _friendPresenceReady = true;
+            _friendPresence.SetRoster(statuses);
             FriendsChanged?.Invoke(this);
         });
     }
@@ -121,10 +118,9 @@ internal sealed partial class AccountSession
     private void OnFriendPresence(UUID id, bool online) => _post(() =>
     {
         if (_disposed) return;
-        var known = _friendPresence.TryGetValue(id, out var previous);
-        _friendPresence[id] = online;
+        var notify = _friendPresence.Update(id, online, IsConnected);
         FriendsChanged?.Invoke(this);
-        if (_friendPresenceReady && known && previous != online && IsConnected)
+        if (notify)
             Notify(NotificationCategory.Friends, DisplayFriendName(id),
                 online ? "is online" : "is offline", id);
     });

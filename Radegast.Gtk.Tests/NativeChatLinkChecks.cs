@@ -28,6 +28,7 @@ internal static class NativeChatLinkChecks
         var group = Field<ChatHistoryView>(groupPanel, "_history");
         var views = new[] { nearby, im, group };
         var avatar = UUID.Random();
+        var profilePeer = UUID.Random();
         var friend = fixture.Friend("Alice Resident").UUID;
         var peer = fixture.Friend("Sender Resident").UUID;
         var groupId = UUID.Random();
@@ -74,31 +75,70 @@ internal static class NativeChatLinkChecks
                         Check(packets().OfType<AvatarPropertiesRequestPacket>().Single().AgentData.AvatarID == avatar,
                             "Clicking the name requested a different profile");
                         Properties(account, friend, "Wrong resident");
-                        Properties(account, avatar, "Correct profile");
+                        Properties(account, avatar, $"Correct profile\n😀 [{ChatLinkChecks.Url(profilePeer)}], {ChatLinkChecks.Url(friend)} tail",
+                            $"First life: {ChatLinkChecks.Url(friend)}.");
                         break;
                     case 3:
                         var shown = Profiles(main, account)[avatar];
                         Check(Field<Label>(shown, "_name").Text == "Momoi Pawprint" &&
-                            Field<TextView>(shown, "_about").Buffer.Text == "Correct profile", "The profile used another resident's reply");
+                            Field<ChatHistoryView>(shown, "_about").Buffer.Text == "Correct profile\n😀 [Loading name…], Alice Resident tail",
+                            "The profile used another resident's reply or retained a raw profile URL");
+                        Check(Field<ChatHistoryView>(shown, "_firstLife").Buffer.Text == "First life: Alice Resident.",
+                            "First Life text did not resolve a profile link or gained a trailing newline");
+                        Check(packets().OfType<UUIDNameRequestPacket>().SelectMany(packet => packet.UUIDNameBlock)
+                            .Count(block => block.ID == profilePeer) == 1, "Profile links did not request their own missing names once");
+                        var about = Field<ChatHistoryView>(shown, "_about");
+                        about.Buffer.SelectRange(about.Buffer.StartIter, about.Buffer.GetIterAtOffset("Correct profile".Length));
+                        fixture.Receive(new UUIDNameReplyPacket
+                        {
+                            UUIDNameBlock = new[] { new UUIDNameReplyPacket.UUIDNameBlockBlock
+                                { ID = profilePeer, FirstName = Utils.StringToBytes("Profile"), LastName = Utils.StringToBytes("Resident") } }
+                        });
+                        shown.ShowAll();
+                        ProfileTabs(shown).CurrentPage = 1;
+                        break;
+                    case 4:
+                        var updated = Profiles(main, account)[avatar];
+                        var updatedAbout = Field<ChatHistoryView>(updated, "_about");
+                        Check(updatedAbout.Buffer.Text == "Correct profile\n😀 [Profile Resident], Alice Resident tail" &&
+                            updatedAbout.Buffer.HasSelection && TagAt(updatedAbout, "Profile Resident").Name == "avatar-" + profilePeer &&
+                            !updatedAbout.Buffer.GetIterAtOffset(Offset(updatedAbout.Buffer.Text, "tail")).Tags.Any(),
+                            "Delayed profile name resolution damaged text, selection or link targets");
+                        Click(Field<ChatHistoryView>(updated, "_firstLife"), "Alice Resident");
+                        break;
+                    case 5:
+                        Check(Profiles(main, account).ContainsKey(friend), "A First Life profile link did not open its resident");
+                        Profiles(main, account)[friend].CloseProfile();
+                        ProfileTabs(Profiles(main, account)[avatar]).CurrentPage = 0;
+                        break;
+                    case 6:
+                        var profileAbout = Field<ChatHistoryView>(Profiles(main, account)[avatar], "_about");
+                        profileAbout.Buffer.PlaceCursor(profileAbout.Buffer.StartIter);
+                        Click(profileAbout, "Profile Resident");
+                        break;
+                    case 7:
+                        Check(Profiles(main, account).ContainsKey(profilePeer), "A Second Life profile link did not open its resident");
+                        Profiles(main, account)[profilePeer].CloseProfile();
+                        var closing = Profiles(main, account)[avatar];
                         // Queue a late reply and dismiss before GTK applies it.
                         Properties(account, avatar, "Late reply");
-                        shown.CloseProfile(); shown.CloseProfile();
+                        closing.CloseProfile(); closing.CloseProfile();
                         Check(Profiles(main, account).Count == 0, "Closing the profile retained the window");
                         Collect();
                         widgets.Tabs.CurrentPage = widgets.Tabs.PageNum(imPanel);
                         break;
-                    case 4:
+                    case 8:
                         Click(im, "Alice Resident");
                         break;
-                    case 5:
+                    case 9:
                         Check(Profiles(main, account).ContainsKey(friend), "An IM profile link opened the previous link's avatar");
                         Profiles(main, account)[friend].CloseProfile();
                         widgets.Tabs.CurrentPage = widgets.Tabs.PageNum(groupPanel);
                         break;
-                    case 6:
+                    case 10:
                         Click(group, "Momoi Pawprint");
                         break;
-                    case 7:
+                    case 11:
                         Check(Profiles(main, account).ContainsKey(avatar), "A group-chat link did not open its avatar's profile");
                         Profiles(main, account)[avatar].CloseProfile();
                         Click(group, "Momoi Pawprint", drag: true);
@@ -107,8 +147,8 @@ internal static class NativeChatLinkChecks
                             for (var i = 0; i < 10; i++) { view.Clear(); view.AppendLine(message); }
                         Collect();
                         break;
-                    case 8:
-                        Console.WriteLine("PASS native GTK profile names/links in nearby chat, IMs and groups; drafts, profile replies, selection and cleanup");
+                    case 12:
+                        Console.WriteLine("PASS native GTK profile names/links in chat and both profile tabs; delayed replies, drafts, selection and cleanup");
                         Application.Quit();
                         return false;
                 }
@@ -134,6 +174,8 @@ internal static class NativeChatLinkChecks
 
     private static Dictionary<UUID, AvatarProfileWindow> Profiles(MainWindow main, AccountSession account) =>
         Field<Dictionary<AccountSession, Dictionary<UUID, AvatarProfileWindow>>>(main, "_profiles")[account];
+    private static Notebook ProfileTabs(AvatarProfileWindow profile) =>
+        (Notebook)Field<ChatHistoryView>(profile, "_about").Parent.Parent;
     private static TextTag TagAt(ChatHistoryView view, string name) =>
         view.Buffer.GetIterAtOffset(Offset(view.Buffer.Text, name)).Tags.Single();
     private static int Offset(string text, string name) => text[..text.LastIndexOf(name, StringComparison.Ordinal)].EnumerateRunes().Count();
@@ -159,8 +201,9 @@ internal static class NativeChatLinkChecks
         }
         finally { EventHelper.Free(evnt); }
     }
-    private static void Properties(AccountSession account, UUID id, string about) => Invoke(account.Client.Avatars, "OnAvatarPropertiesReply",
-        new AvatarPropertiesReplyEventArgs(id, new Avatar.AvatarProperties { AboutText = about, FirstLifeText = "First life", BornOn = "1/1/2020" }));
+    private static void Properties(AccountSession account, UUID id, string about, string firstLife = "First life") =>
+        Invoke(account.Client.Avatars, "OnAvatarPropertiesReply", new AvatarPropertiesReplyEventArgs(id,
+            new Avatar.AvatarProperties { AboutText = about, FirstLifeText = firstLife, BornOn = "1/1/2020" }));
     private static void Connected(AccountSession account, bool value) =>
         typeof(Radegast.NetCom).GetProperty(nameof(Radegast.NetCom.IsLoggedIn))!.SetValue(account.Net, value);
     private static void Invoke(object target, string method, params object[] args) =>

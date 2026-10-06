@@ -20,6 +20,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Chat profile links retain punctuation and Unicode and ignore unrelated or malformed URLs", ChatLinkChecks.Parsing),
     ("Chat profile links resolve names once per account and refresh on server name replies", ChatLinkChecks.Names),
     ("Chat profile links open the referenced avatar and enforce name/location restrictions", ChatLinkChecks.Restrictions),
+    ("Friend presence discovery is quiet across initial packets and later logins/logouts still notify", FriendPresenceChecks.StartupAndChanges),
+    ("Friend presence preserves early replies and resets independently for each account and login", FriendPresenceChecks.OrderingAndReset),
     ("Remembered logins persist and update without plaintext passwords, duplicate aliases or shared grid credentials", SavedLoginChecks.Persistence),
     ("Remembered logins handle unavailable keyrings, corrupt records and cancelled saves", SavedLoginChecks.Failures),
     ("Teleport offers open once for the correct account and notify with the sender and offer label", TeleportOfferChecks.Incoming),
@@ -177,11 +179,14 @@ var tests = new (string Name, Func<Task> Run)[]
         SetConnected(a, true);
         try
         {
+            // LibreMetaverse emits roster-ready from the login response, before
+            // the simulator's first online-status packets. The buddy list has
+            // initialized every friend as offline at this point.
+            typeof(FriendsManager).GetMethod("OnFriendsListReady", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(a.Client.Friends, new object[] { new FriendsReadyEventArgs(1) });
             await FriendsEvent(a, () => f.Receive(new OnlineNotificationPacket
                 { AgentBlock = new[] { new OnlineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
             lock (dispatch) Check(output.Count == 0, "Initial online statuses produced notifications");
-            typeof(FriendsManager).GetMethod("OnFriendsListReady", BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(a.Client.Friends, new object[] { new FriendsReadyEventArgs(1) });
             await FriendsEvent(a, () => f.Receive(new OfflineNotificationPacket
                 { AgentBlock = new[] { new OfflineNotificationPacket.AgentBlockBlock { AgentID = friend.UUID } } }));
             await FriendsEvent(a, () => f.Receive(new OfflineNotificationPacket

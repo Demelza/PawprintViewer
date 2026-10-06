@@ -12,15 +12,16 @@ internal sealed class AvatarProfileWindow : Window
     private readonly Label _name = new() { Xalign = 0, Selectable = true };
     private readonly Label _born = new() { Xalign = 0 };
     private readonly Label _status = new("Loading profile…") { Xalign = 0, LineWrap = true };
-    private readonly TextView _about = new() { Editable = false, CursorVisible = false, WrapMode = WrapMode.WordChar };
-    private readonly TextView _firstLife = new() { Editable = false, CursorVisible = false, WrapMode = WrapMode.WordChar };
-    private string _aboutText = string.Empty, _firstLifeText = string.Empty;
+    private readonly ChatHistoryView _about;
+    private readonly ChatHistoryView _firstLife;
     private bool _closing, _received;
 
     public AvatarProfileWindow(Window parent, AccountSession session, UUID avatar) : base("Avatar profile")
     {
         _session = session;
         _avatar = avatar;
+        _about = new ChatHistoryView(session);
+        _firstLife = new ChatHistoryView(session);
         TransientFor = parent;
         DestroyWithParent = true;
         SetDefaultSize(440, 350);
@@ -69,11 +70,7 @@ internal sealed class AvatarProfileWindow : Window
         if (_closing) return;
         if (!_session.CanViewAvatarProfile(_avatar)) { CloseProfile(); return; }
         var name = _session.DisplayChatAvatarName(_avatar);
-        var about = _session.RedactText(_aboutText);
-        var firstLife = _session.RedactText(_firstLifeText);
         if (_name.Text != name) _name.Text = name;
-        if (_about.Buffer.Text != about) _about.Buffer.Text = about;
-        if (_firstLife.Buffer.Text != firstLife) _firstLife.Buffer.Text = firstLife;
     }
 
     private void OnProperties(object? sender, AvatarPropertiesReplyEventArgs e)
@@ -101,8 +98,8 @@ internal sealed class AvatarProfileWindow : Window
         if (_closing || _received || !_session.CanViewAvatarProfile(_avatar)) return;
         _received = true;
         _born.Text = string.IsNullOrWhiteSpace(born) ? string.Empty : $"Born: {born}";
-        _aboutText = about ?? string.Empty;
-        _firstLifeText = firstLife ?? string.Empty;
+        _about.SetText(about ?? string.Empty);
+        _firstLife.SetText(firstLife ?? string.Empty);
         _status.Text = string.Empty;
         RefreshPresentation();
     }
@@ -121,6 +118,8 @@ internal sealed class AvatarProfileWindow : Window
         _session.Client.Avatars.AvatarPropertiesReply -= OnProperties;
         _session.AvatarNamesChanged -= OnNamesChanged;
         _session.Rlv.Changed -= RefreshPresentation;
+        _about.Stop();
+        _firstLife.Stop();
         _stop.Cancel();
         _stop.Dispose();
     }
