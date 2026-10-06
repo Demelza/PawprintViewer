@@ -39,6 +39,10 @@ account and connection state.
   and unread state. Logging out one account leaves the others connected.
 - The window remains open when all accounts are logged out, so the add-account
   button can start another login.
+- New script menus and permission prompts wait while the viewer is in the
+  background, then appear when the user returns to a viewer window. They do
+  not raise the viewer over other applications. Logging out discards that
+  account's pending prompts.
 
 ## Scope and resource use
 

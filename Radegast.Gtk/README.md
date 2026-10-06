@@ -81,6 +81,10 @@ attempt; this version does not store credentials.
   a Touch button for touchable objects and a disabled button for other objects.
 - Script menus and text prompts opened by touched objects appear in their own
   compact windows; button and text replies go to the correct account.
+- New menus and permission prompts wait while another application has focus.
+  They appear when you manually return to a viewer window, without bringing
+  the viewer forward in the background. Logging out discards that account's
+  pending prompts.
 - Common system folders stay at the top of My Inventory; the Type column uses
   20% of the inventory list, and the fixed details pane uses 25% of the view.
 - Per-account RLV/RLVa support, with an RLV tab for enabling it, inspecting

@@ -110,13 +110,22 @@ internal sealed class FriendsPanel : Box
     private void OpenPayment(UUID id)
     {
         if (_disposed || !_session.CanPayFriend(id)) return;
-        if (_payments.TryGetValue(id, out var existing)) { existing.Present(); return; }
+        if (_payments.TryGetValue(id, out var existing))
+        {
+            ShowPayment(existing);
+            return;
+        }
         if (Toplevel is not Window parent) return;
         var payment = new FriendPaymentWindow(parent, _session, id);
         _payments.Add(id, payment);
         payment.Closed += () => _payments.Remove(id);
-        payment.ShowAll();
-        payment.Present();
+        ShowPayment(payment);
+    }
+
+    private void ShowPayment(FriendPaymentWindow payment)
+    {
+        if (Toplevel is MainWindow main) main.ShowChildWindow(payment);
+        else { payment.ShowAll(); payment.Present(); }
     }
 
     private void OfferTeleport(UUID id)

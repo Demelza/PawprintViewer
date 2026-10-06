@@ -11,14 +11,17 @@ internal sealed class MainWindow : Window
     private readonly Dictionary<AccountSession, SessionWidgets> _sessions = new();
     private readonly Dictionary<AccountSession, HashSet<ScriptDialogWindow>> _scriptDialogs = new();
     private readonly Dictionary<AccountSession, HashSet<ScriptPermissionWindow>> _permissionDialogs = new();
+    private readonly ChildWindowPresenter _childWindows;
     private AccountSession? _selected;
     private LoginWindow? _loginWindow;
 
     public MainWindow() : base(Program.ViewerName)
     {
+        _childWindows = new ChildWindowPresenter(this);
         SetDefaultSize(1120, 720);
         DeleteEvent += (_, _) =>
         {
+            _childWindows.Dispose();
             foreach (var session in _sessions.Keys.ToArray())
                 RemoveSession(session);
             _loginWindow?.Destroy();
@@ -53,18 +56,20 @@ internal sealed class MainWindow : Window
         root.Attach(_nearbyPages, 17, 0, 3, 1);
     }
 
+    internal void ShowChildWindow(Window window, bool showContents = true) => _childWindows.Show(window, showContents);
+
     private void ShowLogin()
     {
         if (_loginWindow != null)
         {
-            _loginWindow.Present();
+            ShowChildWindow(_loginWindow, showContents: false);
             return;
         }
 
         _loginWindow = new LoginWindow(this);
         _loginWindow.LoginSucceeded += AddSession;
         _loginWindow.Destroyed += (_, _) => _loginWindow = null;
-        _loginWindow.Show();
+        ShowChildWindow(_loginWindow, showContents: false);
     }
 
     private void AddSession(AccountSession session)
@@ -179,8 +184,7 @@ internal sealed class MainWindow : Window
             _scriptDialogs[session] = dialogs = new HashSet<ScriptDialogWindow>();
         dialogs.Add(dialog);
         dialog.Destroyed += (_, _) => dialogs.Remove(dialog);
-        dialog.ShowAll();
-        dialog.Present();
+        ShowChildWindow(dialog);
     }
 
     private void OnPermissionRequested(AccountSession session, ScriptQuestionEventArgs request)
@@ -191,7 +195,6 @@ internal sealed class MainWindow : Window
             _permissionDialogs[session] = dialogs = new();
         dialogs.Add(dialog);
         dialog.Destroyed += (_, _) => dialogs.Remove(dialog);
-        dialog.ShowAll();
-        dialog.Present();
+        ShowChildWindow(dialog);
     }
 }

@@ -76,7 +76,7 @@ internal sealed class LoginWindow : Window
         actions.PackEnd(cancel, false, false, 0);
         outer.PackEnd(actions, false, false, 0);
 
-        ShowAll();
+        outer.ShowAll();
         UpdateGridRow();
         _mfaRow.Hide();
         _username.GrabFocus();
