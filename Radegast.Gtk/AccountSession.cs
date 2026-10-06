@@ -206,12 +206,7 @@ internal sealed partial class AccountSession : IDisposable
         if (_disposed) return;
         ReceivePrivateInstantMessage(e.IM);
         ReceiveGroupInstantMessage(e.IM);
-        if (_disposed || !Rlv.Enabled || e.IM.Dialog != InstantMessageDialog.RequestTeleport) return;
-        var permissions = Rlv.Service.Permissions;
-        if (!permissions.CanTPLure(e.IM.FromAgentID.Guid))
-            Client.Self.TeleportLureRespond(e.IM.FromAgentID, e.IM.IMSessionID, false);
-        else if (permissions.IsAutoAcceptTp(e.IM.FromAgentID.Guid) && permissions.CanUnsit())
-            Client.Self.TeleportLureRespond(e.IM.FromAgentID, e.IM.IMSessionID, true);
+        ReceiveTeleportOffer(e.IM);
     }
 
     private void OnLoginProgress(object? sender, LoginProgressEventArgs e)
@@ -268,6 +263,7 @@ internal sealed partial class AccountSession : IDisposable
         if (enabled) Rlv.SetEnabled(true);
         _nearby.Clear();
         _mapAvatarPositions.Clear();
+        ResetTeleportOffers();
         ResetGroupChats();
         _friendPresence.Clear();
         _friendPresenceReady = false;
@@ -386,6 +382,7 @@ internal sealed partial class AccountSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        ResetTeleportOffers();
         StopFriends();
         StopGroupChats();
         Net.ClientLoginStatus -= OnLoginProgress;

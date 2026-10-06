@@ -15,6 +15,10 @@ if (args.Contains("--map-scroll-smoke", StringComparer.Ordinal)) return NativeMa
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Teleport offers open once for the correct account and notify with the sender and offer label", TeleportOfferChecks.Incoming),
+    ("Teleport offer acceptance uses the original lure and refusal reaches the sender exactly once", TeleportOfferChecks.Responses),
+    ("Teleport offers recheck RLV restrictions and seated locks before acceptance", TeleportOfferChecks.Restrictions),
+    ("Teleport offers preserve RLV automatic responses and clear pending decisions on disconnect", TeleportOfferChecks.AutomaticAndDisconnect),
     ("Map clicks resolve the exact region, reject water and invalid points, and respect cancellation and RLV", MapChecks.ClickedRegions),
     ("Map avatar markers use live account-specific coordinates, exclude self and respect nearby restrictions", MapChecks.AvatarPositions),
     ("Map population queries remain bounded when zooming out and at grid edges", MapChecks.PopulationBounds),
@@ -36,7 +40,7 @@ var tests = new (string Name, Func<Task> Run)[]
             Check(restored.Value == settings.Value && restored.LoadError == null, "Notification switches did not survive reopening");
             File.WriteAllText(path, "{\"Menus\":false,\"FutureSetting\":42}");
             var partial = new GlobalSettings(path);
-            Check(!partial.Value.Menus && partial.Value.InstantMessages && partial.Value.Friends,
+            Check(!partial.Value.Menus && partial.Value.InstantMessages && partial.Value.Friends && partial.Value.TeleportOffers,
                 "An older settings file disabled categories it did not contain");
             File.WriteAllText(path, "broken json");
             var broken = new GlobalSettings(path);
@@ -76,6 +80,7 @@ var tests = new (string Name, Func<Task> Run)[]
             using var controller = new NotificationController(settings, output);
             using var a = new AccountSession(action => action());
             using var b = new AccountSession(action => action());
+            var expected = Enum.GetValues<NotificationCategory>().Length * 2;
             foreach (var category in Enum.GetValues<NotificationCategory>())
             {
                 var notice = new AccountNotification(category, "Alice Resident", "<b>x & y</b>", UUID.Random());
@@ -83,16 +88,16 @@ var tests = new (string Name, Func<Task> Run)[]
                 controller.Notify(b, notice, false);
                 controller.Notify(a, notice, true);
             }
-            Check(output.Shown.Count == 10 && output.Shown.All(notice => notice.Body == "<b>x & y</b>"),
+            Check(output.Shown.Count == expected && output.Shown.All(notice => notice.Body == "<b>x & y</b>"),
                 "Visible events were notified or text was escaped before measuring the preview");
             Check(output.Shown.All(notice => notice.Title == "Alice Resident"),
                 "Notification titles included an account prefix instead of the supplied name");
             Check(output.Shown.Select(notice => notice.AccountId).Distinct().Count() == 2 &&
-                output.Shown.Select(notice => notice.Key).Distinct().Count() == 10, "Accounts shared notification identities");
+                output.Shown.Select(notice => notice.Key).Distinct().Count() == expected, "Accounts shared notification identities");
             foreach (var category in Enum.GetValues<NotificationCategory>()) settings.Update(settings.Value.WithCategory(category, false));
             foreach (var category in Enum.GetValues<NotificationCategory>())
                 controller.Notify(a, new(category, "Disabled", "Message", UUID.Random()), false);
-            Check(output.Shown.Count == 10 && Enum.GetValues<NotificationCategory>().All(category =>
+            Check(output.Shown.Count == expected && Enum.GetValues<NotificationCategory>().All(category =>
                 output.Cleared.Any(clear => clear.Category == category)), "Disabled categories still notified or old popups were retained");
             controller.CloseAccount(a.Id);
             Check(output.Cleared.Last().AccountId == a.Id, "Logout did not clear only that account's notifications");

@@ -70,8 +70,9 @@ attempt; this version does not store credentials.
   entire grid. RLV nearby-avatar restrictions hide these markers.
   Failed image downloads retry quietly without an error overlay on the map.
 - **Global Settings**, below **+ Add account**, controls silent desktop popups
-  for IMs, Group Chats, Worn Objects, Menus, and friends going online/offline.
-  All five are enabled initially. Changes apply to every account and are saved
+  for IMs, Group Chats, Worn Objects, Menus, friends going online/offline, and
+  Teleport Offers. All six are enabled initially. Changes apply to every account
+  and are saved
   in `$XDG_CONFIG_HOME/pawprint-viewer/settings.json` (normally
   `~/.config/pawprint-viewer/settings.json`). **Test notification** checks delivery.
   Linux desktop popups use the system's `libnotify` runtime and notification daemon.
@@ -89,6 +90,14 @@ attempt; this version does not store credentials.
   for the same conversation. Initial friend statuses and RLV commands
   do not produce notifications. Disabling a category or logging out clears its
   open popups; conversations and script menus continue to work normally.
+- Incoming teleport offers open an account-specific window saying
+  **[sender] wants to teleport you to their location.** **Accept** starts the
+  offered teleport; **Refuse** or closing the window declines it. Background
+  offers wait until you bring the viewer forward, without taking desktop focus.
+  Their desktop notifications show the sender's name above **Teleport offer**;
+  disabling **Teleport Offers** notifications keeps the decision window available.
+  RLV teleport-lure and seated stand locks apply at acceptance, and existing RLV
+  automatic acceptance/refusal rules still apply. Disconnecting closes old offers.
 - `PawprintViewer.png` supplies the application/window icon and desktop popup
   icon. It is copied alongside the executable for both builds and publishing.
 - Private IMs have a vertical conversation list on the left and the selected

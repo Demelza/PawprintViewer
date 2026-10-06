@@ -143,11 +143,28 @@ replies. See the
 [GTK README](../Radegast.Gtk/README.md#rlv--rlva) for supported features,
 limitations, and the regression-check command.
 
+## Teleport offers checkpoint
+
+Incoming resident teleport lures have a separate GTK decision window with the
+sender's name, recipient account, and Accept/Refuse buttons. Accept sends the
+original lure ID using the receiving account; Refuse and the window close button
+send a decline to the original sender. Responses are single-use, retransmitted
+offers are deduplicated, and disconnect/logout clears pending decisions.
+Acceptance rechecks RLV lure permissions and seated `unsit` locks. Existing RLV
+automatic acceptance and refusal continue to work. Sender names honor RLV
+display restrictions. Background windows wait for the viewer to regain focus.
+
+Teleport Offers has its own global notification switch, enabled by default in
+new and existing settings files. Popups show the sender's name on the first line
+and `Teleport offer` on the second. Disabling notifications keeps the decision
+window available, and foreground decisions follow normal notification suppression.
+
 ## Notifications checkpoint
 
 Global Settings has switches for incoming private IMs, group chats, private
-owner-say/directed chat from worn objects, object menus/text prompts, and friend
-online/offline transitions. Preferences use the XDG configuration directory and
+owner-say/directed chat from worn objects, object menus/text prompts, friend
+online/offline transitions, and teleport offers. Preferences use the XDG
+configuration directory and
 apply immediately. Initial friend presence, outgoing chat, typing, group echoes,
 and RLV commands are excluded. Message content follows RLV receive and display
 rules. A test button provides a manual desktop notification.

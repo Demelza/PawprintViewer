@@ -11,6 +11,7 @@ internal sealed class MainWindow : Window
     private readonly Dictionary<AccountSession, SessionWidgets> _sessions = new();
     private readonly Dictionary<AccountSession, HashSet<ScriptDialogWindow>> _scriptDialogs = new();
     private readonly Dictionary<AccountSession, HashSet<ScriptPermissionWindow>> _permissionDialogs = new();
+    private readonly Dictionary<AccountSession, HashSet<TeleportOfferWindow>> _teleportDialogs = new();
     private readonly ChildWindowPresenter _childWindows;
     private readonly GlobalSettings _globalSettings;
     private readonly NotificationController _notifications;
@@ -110,6 +111,7 @@ internal sealed class MainWindow : Window
         session.NearbyChanged += OnNearbyChanged;
         session.ScriptDialogReceived += OnScriptDialogReceived;
         session.PermissionRequested += OnPermissionRequested;
+        session.TeleportOfferReceived += OnTeleportOfferReceived;
         session.NotificationReceived += OnNotification;
         widgets.AccountRow.ShowAll();
         widgets.Root.ShowAll();
@@ -142,12 +144,15 @@ internal sealed class MainWindow : Window
         session.NearbyChanged -= OnNearbyChanged;
         session.ScriptDialogReceived -= OnScriptDialogReceived;
         session.PermissionRequested -= OnPermissionRequested;
+        session.TeleportOfferReceived -= OnTeleportOfferReceived;
         session.NotificationReceived -= OnNotification;
         _notifications.CloseAccount(session.Id);
         if (_scriptDialogs.Remove(session, out var dialogs))
             foreach (var dialog in dialogs.ToArray()) dialog.CloseMenu();
         if (_permissionDialogs.Remove(session, out var permissions))
             foreach (var dialog in permissions.ToArray()) dialog.ClosePrompt();
+        if (_teleportDialogs.Remove(session, out var offers))
+            foreach (var dialog in offers.ToArray()) dialog.ClosePrompt();
         widgets.Dispose();
         _accountRows.Remove(widgets.AccountRow);
         _pages.Remove(widgets.Root);
@@ -226,8 +231,18 @@ internal sealed class MainWindow : Window
     private void OnNotification(AccountSession session, AccountNotification notice)
     {
         if (!_sessions.TryGetValue(session, out var widgets) || !session.IsConnected) return;
-        var visible = _childWindows.HasFocus && (notice.Category == NotificationCategory.Menus ||
+        var visible = _childWindows.HasFocus && (notice.Category is NotificationCategory.Menus or NotificationCategory.TeleportOffers ||
             (session == _selected && widgets.IsNotificationDisplayed(notice)));
         _notifications.Notify(session, notice, visible);
+    }
+
+    private void OnTeleportOfferReceived(AccountSession session, TeleportOffer offer)
+    {
+        if (!_sessions.ContainsKey(session)) return;
+        var dialog = new TeleportOfferWindow(this, session, offer);
+        if (!_teleportDialogs.TryGetValue(session, out var dialogs)) _teleportDialogs[session] = dialogs = new();
+        dialogs.Add(dialog);
+        dialog.Destroyed += (_, _) => dialogs.Remove(dialog);
+        ShowChildWindow(dialog);
     }
 }

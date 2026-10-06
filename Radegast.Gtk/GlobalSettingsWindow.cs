@@ -25,6 +25,7 @@ internal sealed class GlobalSettingsWindow : Window
         AddCategory(content, NotificationCategory.WornObjects, "Worn Objects", "Private chat from objects you are wearing");
         AddCategory(content, NotificationCategory.Menus, "Menus", "Object menus and text prompts");
         AddCategory(content, NotificationCategory.Friends, "Friends", "Friends going online or offline");
+        AddCategory(content, NotificationCategory.TeleportOffers, "Teleport Offers", "Incoming offers to teleport to another resident");
         _status.SetSizeRequest(360, -1);
         _status.Text = settings.LoadError ?? notifications.Error ?? "Changes apply immediately and are saved automatically.";
         content.PackStart(_status, false, false, 0);

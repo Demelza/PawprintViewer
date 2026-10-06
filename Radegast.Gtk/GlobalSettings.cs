@@ -3,7 +3,7 @@ using LibreMetaverse;
 
 namespace Radegast.Gtk;
 
-internal enum NotificationCategory { InstantMessages, GroupChats, WornObjects, Menus, Friends }
+internal enum NotificationCategory { InstantMessages, GroupChats, WornObjects, Menus, Friends, TeleportOffers }
 internal sealed record AccountNotification(NotificationCategory Category, string Title, string Message, UUID TargetId);
 
 internal sealed record NotificationSettings
@@ -13,6 +13,7 @@ internal sealed record NotificationSettings
     public bool WornObjects { get; init; } = true;
     public bool Menus { get; init; } = true;
     public bool Friends { get; init; } = true;
+    public bool TeleportOffers { get; init; } = true;
 
     public bool IsEnabled(NotificationCategory category) => category switch
     {
@@ -21,6 +22,7 @@ internal sealed record NotificationSettings
         NotificationCategory.WornObjects => WornObjects,
         NotificationCategory.Menus => Menus,
         NotificationCategory.Friends => Friends,
+        NotificationCategory.TeleportOffers => TeleportOffers,
         _ => false
     };
 
@@ -31,6 +33,7 @@ internal sealed record NotificationSettings
         NotificationCategory.WornObjects => this with { WornObjects = enabled },
         NotificationCategory.Menus => this with { Menus = enabled },
         NotificationCategory.Friends => this with { Friends = enabled },
+        NotificationCategory.TeleportOffers => this with { TeleportOffers = enabled },
         _ => this
     };
 }
