@@ -1,4 +1,4 @@
-# GTK3 client plan
+# Pawprint Viewer GTK3 client plan
 
 This document records the agreed direction for a Linux client with native GTK3
 widgets. It uses `Radegast.Core` for grid communication and account services.
@@ -9,7 +9,8 @@ Avalonia user interfaces.
 
 The application has one normally decorated `Gtk.Window`. It uses the active
 GTK3 theme and the system font; no application-wide font or theme override is
-applied.
+applied. Its title is always **Pawprint Viewer**, independent of the selected
+account and connection state.
 
 ```text
 +--------------+-------------------------------------------+------------------+

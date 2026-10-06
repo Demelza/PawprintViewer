@@ -14,7 +14,7 @@ internal sealed class MainWindow : Window
     private AccountSession? _selected;
     private LoginWindow? _loginWindow;
 
-    public MainWindow() : base("Radegast GTK")
+    public MainWindow() : base(Program.ViewerName)
     {
         SetDefaultSize(1120, 720);
         DeleteEvent += (_, _) =>
@@ -102,7 +102,6 @@ internal sealed class MainWindow : Window
             view.SetSelected(account == session);
             view.UpdateAccountLabel(account == session);
         }
-        Title = $"{session.Name} — Radegast GTK";
     }
 
     private void RemoveSession(AccountSession session)
@@ -135,7 +134,6 @@ internal sealed class MainWindow : Window
             {
                 _pages.VisibleChildName = "empty";
                 _nearbyPages.VisibleChildName = "empty";
-                Title = "Radegast GTK";
             }
         }
     }
@@ -144,7 +142,6 @@ internal sealed class MainWindow : Window
     {
         if (!_sessions.TryGetValue(session, out var widgets)) return;
         widgets.UpdateAccountLabel(session == _selected);
-        if (session == _selected) Title = $"{session.Name} — Radegast GTK";
     }
 
     private void OnChatLine(AccountSession session, string line)

@@ -76,8 +76,8 @@ internal sealed partial class AccountSession : IDisposable
         Net.LoginOptions.LastName = parts.Length > 1 ? parts[1] : "Resident";
         Net.LoginOptions.Password = password;
         Net.LoginOptions.Grid = grid;
-        Net.LoginOptions.Channel = "Radegast GTK";
-        Net.LoginOptions.Version = "Radegast GTK 0.1";
+        Net.LoginOptions.Channel = Program.ViewerName;
+        Net.LoginOptions.Version = Program.ViewerVersion;
         Net.LoginOptions.StartLocation = startLocation;
         Net.LoginOptions.MfaToken = mfaToken;
         Net.LoginOptions.MfaHash ??= string.Empty;

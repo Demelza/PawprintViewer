@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <AssemblyName>Radegast.Gtk</AssemblyName>
+    <AssemblyTitle>Pawprint Viewer</AssemblyTitle>
+    <Product>Pawprint Viewer</Product>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Radegast.Gtk.Tests" />

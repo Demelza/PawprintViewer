@@ -1,7 +1,9 @@
-# Radegast GTK
+# Pawprint Viewer
 
 This is the first GTK3 implementation checkpoint for a lightweight Linux
 client. It uses the native GTK theme, font, and normal window-manager borders.
+The main window title is always **Pawprint Viewer**, including when switching
+accounts or logging out.
 It references `Radegast.Core` for grid communication and does not start the
 3D renderer or the FMOD audio engine.
 
