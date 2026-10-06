@@ -205,6 +205,13 @@ The adapter's regression checks run without a display or grid login:
 dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0
 ```
 
+The map's native GTK scroll check requires a desktop display, but no login. It
+checks smooth scrolling and regular mouse-wheel events through GTK callbacks:
+
+```sh
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --map-scroll-smoke
+```
+
 For a live check, use an RLV attachment to test detection, lock/unlock and
 detachment through both the actual item and an inventory link. Then check its
 shared inventory menu and test two accounts with different restrictions.

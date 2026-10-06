@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Cairo;
 using Gdk;
 using Gtk;
@@ -111,8 +110,7 @@ internal sealed class MapCanvas : DrawingArea
     {
         if (!_active) return base.OnScrollEvent(evnt);
         var steps = evnt.Direction switch { ScrollDirection.Up => 1d, ScrollDirection.Down => -1d, _ => 0d };
-        if (evnt.Direction == ScrollDirection.Smooth && gdk_event_get_scroll_deltas(evnt.Handle, out _, out var dy))
-            steps = -dy;
+        if (evnt.Direction == ScrollDirection.Smooth) steps = -evnt.DeltaY;
         if (steps == 0) return false;
         Viewport.Zoom(steps, evnt.X, evnt.Y, AllocatedWidth, AllocatedHeight);
         ScheduleTiles();
@@ -295,8 +293,4 @@ internal sealed class MapCanvas : DrawingArea
         foreach (var tile in _images.Values) tile.Image?.Dispose();
         _images.Clear();
     }
-
-    [DllImport("libgdk-3.so.0")]
-    [return: MarshalAs(UnmanagedType.I4)]
-    private static extern bool gdk_event_get_scroll_deltas(IntPtr evnt, out double dx, out double dy);
 }

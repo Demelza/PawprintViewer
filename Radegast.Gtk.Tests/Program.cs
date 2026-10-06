@@ -10,6 +10,8 @@ using LibreMetaverse.Interfaces;
 using LibreMetaverse.Messages.Linden;
 using Radegast.Gtk;
 
+if (args.Contains("--map-scroll-smoke", StringComparer.Ordinal)) return NativeMapChecks.RunScroll();
+
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
