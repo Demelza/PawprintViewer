@@ -23,8 +23,9 @@ env:
   # Pinned release from https://github.com/KhronosGroup/MoltenVK/releases -- macOS has no
   # system Vulkan driver at all, so the renderer needs this bundled or it can't init Vulkan
   # on any Mac. Downloaded fresh each run rather than vendored in-repo (it's ~11MB and has its
-  # own upstream release cadence); bump this to pick up a MoltenVK update.
-  MOLTENVK_VERSION: 'v1.4.2'
+  # own upstream release cadence). The version is read from RadegastVeles/moltenvk.version in
+  # the Bundle MoltenVK step -- the same file RadegastVeles.csproj uses for local builds -- so
+  # bump it there to pick up a MoltenVK update.
 
 jobs:
   build-macos:
@@ -124,6 +125,7 @@ jobs:
           set -e
           RID=osx-${{ matrix.arch }}
           PUB_DIR=$PUBLISH_DIR/$RID
+          MOLTENVK_VERSION=$(tr -d '[:space:]' < RadegastVeles/moltenvk.version)
           curl -sL -o moltenvk.tar "https://github.com/KhronosGroup/MoltenVK/releases/download/${MOLTENVK_VERSION}/MoltenVK-macos.tar"
           tar -xf moltenvk.tar "MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib" "MoltenVK/LICENSE"
           cp "MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib" "$PUB_DIR/libMoltenVK.dylib"

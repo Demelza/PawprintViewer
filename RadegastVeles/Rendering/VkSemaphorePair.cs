@@ -20,17 +20,16 @@
 // Ported from Avalonia's own samples/GpuInterop/VulkanDemo's VulkanSemaphorePair.cs (MIT
 // licensed, https://github.com/AvaloniaUI/Avalonia). Used by VkInteropSwapchain's Mode A path
 // (native Vulkan compositor, ExternalMemoryHandleTypeFlags.OpaqueWin32Bit images -- see
-// VkInteropImage's handleType branch) -- Mode B's D3D11-backed images use the Win32 keyed-
-// mutex protocol instead (see VkCommandBufferPool's KeyedMutexSubmitInfo), not this class.
-// Kept for completeness/portability even though Veles's chosen integration mode is B, matching
-// VkContext.cs's own precedent of supporting both modes at the device level. No macOS
-// (IOSurface/timeline-semaphore) branch -- see VkInteropImage.cs's note on why that path was
-// dropped rather than ported (needs Silk.NET.Vulkan.Extensions.EXT, deliberately not added).
+// VkInteropImage's per-platform PNext branch) -- Mode B's D3D11-backed images use the Win32
+// keyed-mutex protocol instead (see VkCommandBufferPool's KeyedMutexSubmitInfo), not this
+// class. Kept for completeness/portability; also the active path on macOS (MTLSharedEvent via
+// VK_EXT_metal_objects) and on Linux (opaque FD via VK_KHR_external_semaphore_fd).
 
 using System;
 using System.Runtime.InteropServices;
 using Avalonia.Platform;
 using Silk.NET.Vulkan;
+using Silk.NET.Vulkan.Extensions.EXT;
 using Silk.NET.Vulkan.Extensions.KHR;
 
 namespace Radegast.Veles.Rendering;
@@ -43,6 +42,25 @@ internal sealed unsafe class VkSemaphorePair : IDisposable
     {
         _vk = vk;
 
+        void* createPNext = null;
+
+        // On macOS, binary semaphores use id<MTLEvent> internally in MoltenVK, which exports
+        // as null from ExportMetalSharedEventInfoEXT (MTLEvent ≠ MTLSharedEvent). Timeline
+        // semaphores use id<MTLSharedEvent> and export correctly. Build the pNext chain:
+        //   SemaphoreTypeCreateInfo (timeline) → ExportMetalObjectCreateInfoEXT (MTLSharedEvent)
+        var exportMetalInfo = new ExportMetalObjectCreateInfoEXT
+        {
+            SType = StructureType.ExportMetalObjectCreateInfoExt,
+            ExportObjectType = ExportMetalObjectTypeFlagsEXT.SharedEventBitExt
+        };
+        var timelineInfo = new SemaphoreTypeCreateInfo
+        {
+            SType = StructureType.SemaphoreTypeCreateInfo,
+            SemaphoreType = SemaphoreType.Timeline,
+            InitialValue = 0,
+            PNext = &exportMetalInfo
+        };
+
         var semaphoreExportInfo = new ExportSemaphoreCreateInfo
         {
             SType = StructureType.ExportSemaphoreCreateInfo,
@@ -51,10 +69,15 @@ internal sealed unsafe class VkSemaphorePair : IDisposable
                 : ExternalSemaphoreHandleTypeFlags.OpaqueFDBit
         };
 
+        if (exportable)
+            createPNext = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                ? (void*)&timelineInfo
+                : (void*)&semaphoreExportInfo;
+
         var semaphoreCreateInfo = new SemaphoreCreateInfo
         {
             SType = StructureType.SemaphoreCreateInfo,
-            PNext = exportable ? &semaphoreExportInfo : null
+            PNext = createPNext
         };
 
         vk.Api.CreateSemaphore(vk.Device, in semaphoreCreateInfo, null, out var semaphore).ThrowOnError();
@@ -96,7 +119,27 @@ internal sealed unsafe class VkSemaphorePair : IDisposable
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             return new PlatformHandle(ExportWin32(renderFinished), KnownPlatformGraphicsExternalSemaphoreHandleTypes.VulkanOpaqueNtHandle);
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return new PlatformHandle(ExportMTLSharedEvent(renderFinished), KnownPlatformGraphicsExternalSemaphoreHandleTypes.MetalSharedEvent);
         return new PlatformHandle(new IntPtr(ExportFd(renderFinished)), KnownPlatformGraphicsExternalSemaphoreHandleTypes.VulkanOpaquePosixFileDescriptor);
+    }
+
+    private nint ExportMTLSharedEvent(bool renderFinished)
+    {
+        if (!_vk.Api.TryGetDeviceExtension<ExtMetalObjects>(_vk.Instance, _vk.Device, out var ext))
+            throw new InvalidOperationException("VK_EXT_metal_objects not available");
+        var sharedEventInfo = new ExportMetalSharedEventInfoEXT
+        {
+            SType = StructureType.ExportMetalSharedEventInfoExt,
+            Semaphore = renderFinished ? RenderFinishedSemaphore : ImageAvailableSemaphore
+        };
+        var exportObjects = new ExportMetalObjectsInfoEXT
+        {
+            SType = StructureType.ExportMetalObjectsInfoExt,
+            PNext = &sharedEventInfo
+        };
+        ext.ExportMetalObjects(_vk.Device, &exportObjects);
+        return sharedEventInfo.MtlSharedEvent;
     }
 
     internal Semaphore ImageAvailableSemaphore { get; }

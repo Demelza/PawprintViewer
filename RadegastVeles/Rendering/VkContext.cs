@@ -332,34 +332,55 @@ internal sealed unsafe class VkContext : IDisposable
                 }
             }
 
+            // Early exits between instance creation and device selection must release the instance
+            // (and messenger) themselves: the finally block below only tears down device-level
+            // objects, so a plain `return` here would leak both for the process lifetime.
+            (VkContext?, string) FailEarly(string message)
+            {
+                if (debugUtils != null && debugMessenger.Handle != default)
+                    debugUtils.DestroyDebugUtilsMessenger(vkInstance, debugMessenger, null);
+                api.DestroyInstance(vkInstance, null);
+                return (null, message);
+            }
+
             var requireDeviceExtensions = new List<string>();
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                requireDeviceExtensions.AddRange(["VK_KHR_external_memory", "VK_KHR_external_semaphore"]);
-            else
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                 // Per spec, a device that advertises VK_KHR_portability_subset (MoltenVK's
-                // always does) MUST have it explicitly enabled at vkCreateDevice time. This is
-                // the device-level counterpart to VK_KHR_portability_enumeration above, but
-                // unlike that one it's provided by MoltenVK itself, not the (bypassed) Vulkan
-                // Loader, so no availability check is needed -- the physical-device filter loop
-                // below (requireDeviceExtensions.Any(... !IsDeviceExtensionPresent ...)) already
-                // skips any device that somehow doesn't support it.
+                // always does) MUST have it explicitly enabled at vkCreateDevice time. The
+                // device-filter loop below skips any device that somehow doesn't support it.
                 requireDeviceExtensions.Add("VK_KHR_portability_subset");
+            else
+                requireDeviceExtensions.AddRange(["VK_KHR_external_memory", "VK_KHR_external_semaphore"]);
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 if (!(gpuInterop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.D3D11TextureGlobalSharedHandle)
                       || gpuInterop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.VulkanOpaqueNtHandle)))
-                    return (null, "Image sharing is not supported by the current Avalonia rendering backend");
+                    return FailEarly("Image sharing is not supported by the current Avalonia rendering backend");
                 requireDeviceExtensions.Add(KhrExternalMemoryWin32.ExtensionName);
                 requireDeviceExtensions.Add(KhrExternalSemaphoreWin32.ExtensionName);
                 requireDeviceExtensions.Add("VK_KHR_dedicated_allocation");
                 requireDeviceExtensions.Add("VK_KHR_get_memory_requirements2");
             }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                // Avalonia's macOS Metal compositor shares images as IOSurfaces and synchronizes
+                // with MTLSharedEvents. VK_EXT_metal_objects (present in MoltenVK v1.2+) exports
+                // both from Vulkan objects; the device-filter loop below availability-checks it.
+                if (!gpuInterop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.IOSurfaceRef)
+                    || !gpuInterop.SupportedSemaphoreTypes.Contains(KnownPlatformGraphicsExternalSemaphoreHandleTypes.MetalSharedEvent))
+                    return FailEarly("Image sharing is not supported by the current Avalonia rendering backend");
+                requireDeviceExtensions.Add(ExtMetalObjects.ExtensionName);
+                // The macOS sync path (VkSemaphorePair/VkInteropSwapchain) uses timeline
+                // semaphores, which are core only in Vulkan 1.2; the instance is created at 1.1,
+                // so the extension and the timelineSemaphore feature must be enabled explicitly.
+                requireDeviceExtensions.Add("VK_KHR_timeline_semaphore");
+            }
             else
             {
                 if (!gpuInterop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.VulkanOpaquePosixFileDescriptor)
                     || !gpuInterop.SupportedSemaphoreTypes.Contains(KnownPlatformGraphicsExternalSemaphoreHandleTypes.VulkanOpaquePosixFileDescriptor))
-                    return (null, "Image sharing is not supported by the current Avalonia rendering backend");
+                    return FailEarly("Image sharing is not supported by the current Avalonia rendering backend");
                 requireDeviceExtensions.Add(KhrExternalMemoryFd.ExtensionName);
                 requireDeviceExtensions.Add(KhrExternalSemaphoreFd.ExtensionName);
             }
@@ -418,6 +439,12 @@ internal sealed unsafe class VkContext : IDisposable
                         PQueuePriorities = queuePriorities
                     };
 
+                    var timelineFeatures = new PhysicalDeviceTimelineSemaphoreFeatures
+                    {
+                        SType = StructureType.PhysicalDeviceTimelineSemaphoreFeatures,
+                        TimelineSemaphore = true
+                    };
+
                     using var pEnabledDeviceExtensions = new VkByteStringList(requireDeviceExtensions);
                     var deviceCreateInfo = new DeviceCreateInfo
                     {
@@ -426,7 +453,8 @@ internal sealed unsafe class VkContext : IDisposable
                         PQueueCreateInfos = &queueCreateInfo,
                         PpEnabledExtensionNames = pEnabledDeviceExtensions,
                         EnabledExtensionCount = pEnabledDeviceExtensions.UCount,
-                        PEnabledFeatures = &features
+                        PEnabledFeatures = &features,
+                        PNext = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? &timelineFeatures : null
                     };
 
                     api.CreateDevice(physicalDevice, in deviceCreateInfo, null, out device).ThrowOnError();

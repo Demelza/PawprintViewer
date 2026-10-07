@@ -2,12 +2,18 @@
 precision highp float;
 
 // God-ray occlusion mask: reads the full-resolution HDR scene colour and SSAO's G-buffer depth,
-// and writes a downsampled (half-resolution, same target size as bloom) copy of the HDR colour
-// ONLY where nothing was drawn (depth reads as the far plane -- sky, including the sky shader's
-// own sun-glow disc), zeroed everywhere geometry occluded it. VkGodRayBlurPipeline then streaks
+// and writes a downsampled (half-resolution, same target size as bloom) brightness mask of the
+// sky (sky pixels = their luminance, geometry pixels = 0). VkGodRayBlurPipeline then streaks
 // this toward the sun's screen position. Uses quad.vert like every other full-screen pass here.
+//
+// Why luminance, not raw RGB? The sky's HDR colour is strongly influenced by the region's
+// atmosphere uniforms (uBlueHorizon / uSunlightColor etc.), which can be green-dominant in
+// unusual EEP presets. Propagating raw RGB through the radial blur and into the tonemap
+// composite turns those presets into a green-screen effect. Using luminance here keeps the
+// mask colour-neutral; the warm tint (kGodRayTint in tonemap.frag) is applied once, at composite
+// time, so god-rays always read as warm-white streaks regardless of the region's sky colour.
 
-layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (B10G11R11UfloatPack32)
+layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (R16G16B16A16Sfloat)
 layout(set = 0, binding = 1) uniform sampler2D uDepthTex;   // SSAO's G-buffer depth (same camera)
 
 layout(push_constant) uniform PerDraw
@@ -27,22 +33,21 @@ const float kSkyDepthThreshold = 0.9999;
 
 void main()
 {
-    // 4-tap box downsample, same reasoning as bloom_extract.frag's identical pattern: a single
-    // bilinear tap at this pass's own (half-res) UV would alias under camera motion.
-    vec3 colorSum = vec3(0.0);
+    float lumaSum = 0.0;
     float skyTaps = 0.0;
     vec2 offsets[4] = vec2[4](
         vec2(-0.5, -0.5), vec2(0.5, -0.5), vec2(-0.5, 0.5), vec2(0.5, 0.5));
     for (int i = 0; i < 4; i++)
     {
-        vec2 uv = vTexCoord + uSrcTexelSize * offsets[i];
+        vec2  uv    = vTexCoord + uSrcTexelSize * offsets[i];
         float depth = texture(uDepthTex, uv).r;
         if (depth >= kSkyDepthThreshold)
         {
-            colorSum += texture(uSceneColor, uv).rgb;
+            vec3 c = texture(uSceneColor, uv).rgb;
+            lumaSum += dot(c, vec3(0.2126, 0.7152, 0.0722));
             skyTaps += 1.0;
         }
     }
-
-    fragColor = vec4(skyTaps > 0.0 ? colorSum / skyTaps : vec3(0.0), 1.0);
+    float luma = skyTaps > 0.0 ? lumaSum / skyTaps : 0.0;
+    fragColor = vec4(luma, luma, luma, 1.0);
 }

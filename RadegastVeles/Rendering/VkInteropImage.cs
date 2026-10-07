@@ -23,13 +23,11 @@
 // VkInteropSwapchain), or -- not used by Veles today -- a non-exportable image if some future
 // pass needed one.
 //
-// Trimmed from the original in two ways: (1) no GRContext/SkiaSharp SaveTexture() debug/
-// screenshot feature (matches the same trim VkContext.cs already made -- not part of the
-// render/present pipeline); (2) no macOS IOSurface export path -- that needs
-// Silk.NET.Vulkan.Extensions.EXT, deliberately not added to RadegastVeles.csproj since it's
-// only needed if a macOS fallback path is ever pursued. Kept: the Windows D3D11-shared-handle
-// / native-Vulkan-opaque-Win32 branch (Mode B, what Veles actually runs) and the generic Linux
-// opaque-FD branch (unused today but zero extra package cost, unlike the EXT-gated macOS path).
+// Trimmed from the original in one way: no GRContext/SkiaSharp SaveTexture() debug/screenshot
+// feature (matches the same trim VkContext.cs already made -- not part of the render/present
+// pipeline). Three interop modes are implemented: Windows D3D11-shared-handle / native-Vulkan-
+// opaque-Win32 (Mode B, what Veles actually runs on Windows), generic Linux opaque-FD (unused
+// today but zero extra package cost), and macOS IOSurface via VK_EXT_metal_objects (MoltenVK).
 
 using System;
 using System.Collections.Generic;
@@ -41,6 +39,7 @@ using Silk.NET.Core.Native;
 using Silk.NET.Direct3D11;
 using Silk.NET.DXGI;
 using Silk.NET.Vulkan;
+using Silk.NET.Vulkan.Extensions.EXT;
 using Silk.NET.Vulkan.Extensions.KHR;
 using static Silk.NET.Core.Native.SilkMarshal;
 using Device = Silk.NET.Vulkan.Device;
@@ -87,22 +86,33 @@ internal sealed unsafe class VkInteropImage : IDisposable
         _imageUsageFlags = ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.TransferDstBit |
                             ImageUsageFlags.TransferSrcBit | ImageUsageFlags.SampledBit;
 
+        var isMacOS = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+
         var handleType = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
             ? (supportedHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.D3D11TextureNtHandle)
                && !supportedHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.VulkanOpaqueNtHandle)
                 ? ExternalMemoryHandleTypeFlags.D3D11TextureBit
                 : ExternalMemoryHandleTypeFlags.OpaqueWin32Bit)
-            : ExternalMemoryHandleTypeFlags.OpaqueFDBit;
+            : ExternalMemoryHandleTypeFlags.OpaqueFDBit; // Linux; unused on macOS
 
         var externalMemoryCreateInfo = new ExternalMemoryImageCreateInfo
         {
             SType = StructureType.ExternalMemoryImageCreateInfo,
             HandleTypes = handleType
         };
+        // macOS: VK_EXT_metal_objects uses pNext on the image create info instead of
+        // ExternalMemoryImageCreateInfo to mark the image for IOSurface export.
+        var exportMetalObjectCreateInfo = new ExportMetalObjectCreateInfoEXT
+        {
+            SType = StructureType.ExportMetalObjectCreateInfoExt,
+            ExportObjectType = ExportMetalObjectTypeFlagsEXT.IosurfaceBitExt
+        };
 
         var imageCreateInfo = new ImageCreateInfo
         {
-            PNext = exportable ? &externalMemoryCreateInfo : null,
+            PNext = exportable
+                ? (isMacOS ? (void*)&exportMetalObjectCreateInfo : (void*)&externalMemoryCreateInfo)
+                : null,
             SType = StructureType.ImageCreateInfo,
             ImageType = ImageType.Type2D,
             Format = Format,
@@ -154,7 +164,12 @@ internal sealed unsafe class VkInteropImage : IDisposable
 
             var memoryAllocateInfo = new MemoryAllocateInfo
             {
-                PNext = exportable ? (handleImport.Handle != IntPtr.Zero ? &handleImport : &fdExport) : null,
+                // macOS: IOSurface is associated with the VkImage via VK_EXT_metal_objects, not
+                // with the VkDeviceMemory, so ExportMemoryAllocateInfo is not used; only the
+                // dedicated-allocation hint is chained.
+                PNext = isMacOS
+                    ? (exportable ? (void*)&dedicatedAllocation : null)
+                    : (exportable ? (handleImport.Handle != IntPtr.Zero ? (void*)&handleImport : (void*)&fdExport) : null),
                 SType = StructureType.MemoryAllocateInfo,
                 AllocationSize = memoryRequirements.Size,
                 MemoryTypeIndex = (uint)VkMemoryHelper.FindSuitableMemoryTypeIndex(
@@ -229,8 +244,7 @@ internal sealed unsafe class VkInteropImage : IDisposable
     /// <summary>Exports this image for import into Avalonia's compositor via
     /// <see cref="Avalonia.Rendering.Composition.ICompositionGpuInterop.ImportImage"/> --
     /// picks the handle type matching whatever platform/mode this image was actually created
-    /// for (see the constructor's <c>handleType</c> branch). No macOS branch -- see the
-    /// class-level note on why the IOSurface path was dropped rather than ported.</summary>
+    /// for (see the constructor's per-platform PNext branch).</summary>
     public IPlatformHandle Export()
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -239,7 +253,27 @@ internal sealed unsafe class VkInteropImage : IDisposable
                 return new PlatformHandle(CreateDxgiSharedHandle(), KnownPlatformGraphicsExternalImageHandleTypes.D3D11TextureNtHandle);
             return new PlatformHandle(ExportOpaqueNtHandle(), KnownPlatformGraphicsExternalImageHandleTypes.VulkanOpaqueNtHandle);
         }
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return new PlatformHandle(ExportIOSurface(), KnownPlatformGraphicsExternalImageHandleTypes.IOSurfaceRef);
         return new PlatformHandle(new IntPtr(ExportFd()), KnownPlatformGraphicsExternalImageHandleTypes.VulkanOpaquePosixFileDescriptor);
+    }
+
+    private nint ExportIOSurface()
+    {
+        if (!Api.TryGetDeviceExtension<ExtMetalObjects>(_instance, _device, out var ext))
+            throw new InvalidOperationException("VK_EXT_metal_objects not available");
+        var ioSurfaceInfo = new ExportMetalIOSurfaceInfoEXT
+        {
+            SType = StructureType.ExportMetalIOSurfaceInfoExt,
+            Image = InternalHandle
+        };
+        var exportObjects = new ExportMetalObjectsInfoEXT
+        {
+            SType = StructureType.ExportMetalObjectsInfoExt,
+            PNext = &ioSurfaceInfo
+        };
+        ext.ExportMetalObjects(_device, &exportObjects);
+        return ioSurfaceInfo.IoSurface;
     }
 
     /// <summary>True on Mode B: this image's memory is a DXGI-shared D3D11

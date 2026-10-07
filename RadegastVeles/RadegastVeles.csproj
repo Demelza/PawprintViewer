@@ -114,7 +114,9 @@
        macOS/Linux this instead relies on the .NET runtime's own default P/Invoke probing for a
        bare [DllImport("fmod")], which finds "lib" + name + ".dylib"/".so" automatically as long
        as the file sits next to the assembly, no custom loader needed, just get it copied there. -->
-  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+  <!-- Fire on macOS regardless of whether a RID is set: plain `dotnet build` leaves
+       $(RuntimeIdentifier) empty, so the original condition never fired for local dev runs. -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx')) Or $([MSBuild]::IsOSPlatform('OSX'))">
     <None Include="..\Radegast.Core\assemblies\libfmod.dylib" CopyToOutputDirectory="PreserveNewest" Link="libfmod.dylib" />
   </ItemGroup>
   <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('linux'))">
@@ -124,4 +126,34 @@
          Ship the real file directly under the plain name instead of relying on that chain. -->
     <None Include="..\Radegast.Core\assemblies\libfmod.so.12.10" CopyToOutputDirectory="PreserveNewest" Link="libfmod.so" />
   </ItemGroup>
+
+  <!-- macOS: bundle MoltenVK (Vulkan-on-Metal) for local `dotnet build` runs.
+       The publish workflow (publish-veles-macos.yml "Bundle MoltenVK" step) handles this for CI
+       release builds; this pair of targets handles local dev where no workflow step runs and no
+       RID is set. MoltenVK is downloaded once into .moltenvk/ in the repo root (gitignored) and
+       re-copied to $(OutDir) on each build. The three output filenames (libMoltenVK.dylib +
+       libvulkan.dylib / libvulkan.1.dylib symlinks) match what the workflow step creates so the
+       app finds Vulkan under either build mode. The version lives in moltenvk.version, the single
+       source of truth also read by publish-veles-macos.yml. -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <MoltenVKVersion Condition="'$(MoltenVKVersion)' == ''">$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)moltenvk.version').Trim())</MoltenVKVersion>
+    <MoltenVKCacheDir>$(MSBuildThisFileDirectory)../.moltenvk/</MoltenVKCacheDir>
+    <MoltenVKDylib>$(MoltenVKCacheDir)libMoltenVK.dylib</MoltenVKDylib>
+  </PropertyGroup>
+
+  <Target Name="DownloadMoltenVK" BeforeTargets="Build" Condition="$([MSBuild]::IsOSPlatform('OSX')) And !Exists('$(MoltenVKDylib)')">
+    <MakeDir Directories="$(MoltenVKCacheDir)" />
+    <Message Text="[MoltenVK] Downloading $(MoltenVKVersion) into .moltenvk/ for local macOS build..." Importance="High" />
+    <Exec Command="curl -fsSL -o &quot;$(MoltenVKCacheDir)moltenvk.tar&quot; &quot;https://github.com/KhronosGroup/MoltenVK/releases/download/$(MoltenVKVersion)/MoltenVK-macos.tar&quot;" />
+    <Exec Command="tar -xf &quot;$(MoltenVKCacheDir)moltenvk.tar&quot; -C &quot;$(MoltenVKCacheDir)&quot; MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib" />
+    <Copy SourceFiles="$(MoltenVKCacheDir)MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib" DestinationFiles="$(MoltenVKDylib)" />
+    <Delete Files="$(MoltenVKCacheDir)moltenvk.tar" />
+    <RemoveDir Directories="$(MoltenVKCacheDir)MoltenVK" />
+  </Target>
+
+  <Target Name="CopyMoltenVK" AfterTargets="Build" Condition="$([MSBuild]::IsOSPlatform('OSX')) And Exists('$(MoltenVKDylib)')">
+    <Copy SourceFiles="$(MoltenVKDylib)" DestinationFiles="$(OutDir)libMoltenVK.dylib" SkipUnchangedFiles="true" />
+    <Exec Command="ln -sf libMoltenVK.dylib &quot;$(OutDir)libvulkan.dylib&quot;" />
+    <Exec Command="ln -sf libMoltenVK.dylib &quot;$(OutDir)libvulkan.1.dylib&quot;" />
+  </Target>
 </Project>

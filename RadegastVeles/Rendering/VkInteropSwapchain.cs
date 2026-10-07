@@ -39,6 +39,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Avalonia;
+using Microsoft.Extensions.Logging;
 using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
 using Silk.NET.Vulkan;
@@ -108,6 +109,9 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
     private ICompositionImportedGpuImage? _importedImage;
     private Task? _lastPresent;
     private bool _initial = true;
+    // macOS timeline semaphore value tracking: incremented each Present(), used in BeginDraw().
+    // Binary semaphores (Windows/Linux) don't use these.
+    private ulong _timelineSignalValue = 0;
 
     public VkInteropImage Image => _image;
     public PixelSize Size { get; }
@@ -121,12 +125,17 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
         _target = target;
         _reapRing = reapRing;
         Size = size;
-        _image = new VkInteropImage(vk, Format.R8G8B8A8Unorm, size, true, interop.SupportedImageHandleTypes);
+        // macOS: Avalonia's native Metal compositor hardcodes BGRA8 (kCVPixelFormatType_32BGRA)
+        // for IOSurface import. MoltenVK only supports IOSurface-backed VkImages in B8G8R8A8_UNORM
+        // (the matching Vulkan format); R8G8B8A8_UNORM produces a null IOSurface → black screen.
+        var swapchainFormat = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+            ? Format.B8G8R8A8Unorm : Format.R8G8B8A8Unorm;
+        _image = new VkInteropImage(vk, swapchainFormat, size, true, interop.SupportedImageHandleTypes);
         if (!_image.IsDirectXBacked)
             _semaphorePair = new VkSemaphorePair(vk, true);
     }
 
-    public void BeginDraw()
+    public unsafe void BeginDraw()
     {
         var buffer = _vk.Pool.CreateCommandBuffer("VkInteropSwapchainImage.BeginDraw");
         buffer.BeginRecording();
@@ -145,13 +154,30 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
             _initial = false;
             buffer.Submit();
         }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            // macOS timeline semaphore: wait for ImageAvailableSemaphore at the value Avalonia
+            // signaled when it finished consuming the previous frame from this swapchain image.
+            ulong waitValue = _timelineSignalValue;
+            var timelineSubmitInfo = new TimelineSemaphoreSubmitInfo
+            {
+                SType = StructureType.TimelineSemaphoreSubmitInfo,
+                WaitSemaphoreValueCount = 1,
+                PWaitSemaphoreValues = &waitValue
+            };
+            buffer.Submit(new[] { _semaphorePair!.ImageAvailableSemaphore },
+                new[] { PipelineStageFlags.AllGraphicsBit },
+                null,
+                pNext: new IntPtr(&timelineSubmitInfo));
+        }
         else
             buffer.Submit(new[] { _semaphorePair!.ImageAvailableSemaphore }, new[] { PipelineStageFlags.AllGraphicsBit });
         _reapRing.MarkUsed(buffer);
     }
 
-    public void Present()
+    public unsafe void Present()
     {
+        var isMacOS = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
         var buffer = _vk.Pool.CreateCommandBuffer("VkInteropSwapchainImage.Present");
         buffer.BeginRecording();
         // Matches VkRenderPass.CreateMainScenePass's layout-ownership note: the render pass
@@ -168,27 +194,71 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
                 ReleaseKey = 1
             });
         }
+        else if (isMacOS)
+        {
+            // macOS timeline semaphore: signal RenderFinishedSemaphore at ++_timelineSignalValue.
+            // Avalonia waits for this value before compositing the IOSurface, then signals
+            // ImageAvailableSemaphore at the same value (the value BeginDraw waits on next time).
+            _timelineSignalValue++;
+            ulong signalValue = _timelineSignalValue;
+            var timelineSubmitInfo = new TimelineSemaphoreSubmitInfo
+            {
+                SType = StructureType.TimelineSemaphoreSubmitInfo,
+                SignalSemaphoreValueCount = 1,
+                PSignalSemaphoreValues = &signalValue
+            };
+            buffer.Submit(null, null, new[] { _semaphorePair!.RenderFinishedSemaphore },
+                pNext: new IntPtr(&timelineSubmitInfo));
+        }
         else
             buffer.Submit(null, null, new[] { _semaphorePair!.RenderFinishedSemaphore });
         _reapRing.MarkUsed(buffer);
 
         if (!_image.IsDirectXBacked)
         {
-            _availableSemaphore ??= _interop.ImportSemaphore(_semaphorePair!.Export(false));
-            _renderCompletedSemaphore ??= _interop.ImportSemaphore(_semaphorePair!.Export(true));
+            if (_availableSemaphore == null)
+            {
+                var availHandle = _semaphorePair!.Export(false);
+                if (isMacOS)
+                    LibreMetaverse.Logger.Log($"[VkInterop] Available MTLSharedEvent handle: 0x{availHandle.Handle:X}", LogLevel.Information);
+                _availableSemaphore = _interop.ImportSemaphore(availHandle);
+            }
+            if (_renderCompletedSemaphore == null)
+            {
+                var renderHandle = _semaphorePair!.Export(true);
+                if (isMacOS)
+                    LibreMetaverse.Logger.Log($"[VkInterop] RenderCompleted MTLSharedEvent handle: 0x{renderHandle.Handle:X}", LogLevel.Information);
+                _renderCompletedSemaphore = _interop.ImportSemaphore(renderHandle);
+            }
         }
 
-        _importedImage ??= _interop.ImportImage(_image.Export(), new PlatformGraphicsExternalImageProperties
+        if (_importedImage == null)
         {
-            Format = PlatformGraphicsExternalImageFormat.R8G8B8A8UNorm,
-            Width = Size.Width,
-            Height = Size.Height,
-            MemorySize = _image.MemorySize
-        });
+            var imageHandle = _image.Export();
+            if (isMacOS)
+                LibreMetaverse.Logger.Log($"[VkInterop] IOSurface handle: 0x{imageHandle.Handle:X}", LogLevel.Information);
+            _importedImage = _interop.ImportImage(imageHandle, new PlatformGraphicsExternalImageProperties
+            {
+                Format = isMacOS
+                    ? PlatformGraphicsExternalImageFormat.B8G8R8A8UNorm
+                    : PlatformGraphicsExternalImageFormat.R8G8B8A8UNorm,
+                Width = Size.Width,
+                Height = Size.Height,
+                MemorySize = _image.MemorySize
+            });
+        }
 
+        // macOS: timeline semaphores require explicit wait/signal values.
+        // Avalonia waits for RenderFinishedSemaphore at _timelineSignalValue (what we just
+        // signaled in the submit above), then signals ImageAvailableSemaphore at the same
+        // value so BeginDraw's GPU-side wait (which also waits for _timelineSignalValue) unblocks.
         _lastPresent = _image.IsDirectXBacked
             ? _target.UpdateWithKeyedMutexAsync(_importedImage, 1, 0)
-            : _target.UpdateWithSemaphoresAsync(_importedImage, _renderCompletedSemaphore!, _availableSemaphore!);
+            : isMacOS
+                ? _target.UpdateWithTimelineSemaphoresAsync(_importedImage,
+                    _renderCompletedSemaphore!, _timelineSignalValue,
+                    _availableSemaphore!, _timelineSignalValue)
+                : _target.UpdateWithSemaphoresAsync(_importedImage, _renderCompletedSemaphore!, _availableSemaphore!);
     }
 
     public async ValueTask DisposeAsync()

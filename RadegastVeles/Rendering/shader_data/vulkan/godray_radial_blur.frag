@@ -27,25 +27,23 @@ layout(push_constant) uniform PerDraw
 layout(location = 0) in  vec2 vTexCoord;
 layout(location = 0) out vec4 fragColor;
 
-const int   kNumSamples  = 32;
-const float kDensity     = 0.9;   // fraction of the pixel-to-sun distance covered by the march
+const int   kNumSamples   = 32;
+const float kDensity      = 0.9;   // fraction of the pixel-to-sun distance covered by the march
 const float kSampleWeight = 1.2;
 const float kExposure     = 0.35;
 
 void main()
 {
-    vec2 deltaUv = (vTexCoord - uSunUv) * (kDensity / float(kNumSamples));
-    vec2 uv = vTexCoord;
+    vec2  delta = (uSunUv - vTexCoord) * kDensity / float(kNumSamples);
+    vec2  uv    = vTexCoord;
     float decay = 1.0;
-    vec3 color = vec3(0.0);
+    vec3  color = vec3(0.0);
 
     for (int i = 0; i < kNumSamples; i++)
     {
-        uv -= deltaUv;
-        vec3 s = texture(uMaskTex, uv).rgb * (decay * kSampleWeight);
-        color += s;
+        uv    += delta;
+        color += texture(uMaskTex, uv).rgb * decay * kSampleWeight;
         decay *= uDecay;
     }
-
-    fragColor = vec4(color * kExposure * uIntensity, 1.0);
+    fragColor = vec4(color * (kExposure * uIntensity / float(kNumSamples)), 1.0);
 }

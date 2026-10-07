@@ -1099,6 +1099,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         }
 
         var cts = new CancellationTokenSource();
+        var token = cts.Token; // capture before _inflight exposes it to a concurrent EnqueueBuild
         _inflight[localId] = cts;
         _building[localId] = Environment.TickCount64;
 
@@ -1133,7 +1134,6 @@ internal sealed class SceneAvatarStreamer : IDisposable
         // no avatar position data yet (e.g. the very first packet).
         EnsurePlaceholderVisible(localId);
 
-        var token = cts.Token;
         _scheduler.Enqueue(priority, _ => BuildAvatarAsync(localId, token));
     }
 

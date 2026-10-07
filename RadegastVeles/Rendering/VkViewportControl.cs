@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -335,7 +336,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private VkOutlinePipeline? _outline;
     private VkPickPipeline? _pick;
     // Own dedicated render pass, NOT _renderPass -- see VkRenderPass.CreatePickPass's own doc
-    // comment for why sharing _renderPass (B10G11R11UfloatPack32 since the HDR-buffer/tonemap work)
+    // comment for why sharing _renderPass (_hdrColorFormat since the HDR-buffer/tonemap work)
     // would corrupt the pick target's exact-byte R8G8B8A8Unorm ID encoding.
     private RenderPass _pickRenderPass;
 
@@ -445,7 +446,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // shape exactly (see those fields' doc comments) -- same "plain Image, hand-tracked
     // layout/access, CmdCopyImage destination + sampled texture, never a render-pass attachment
     // itself" role, just a different source (the still-open _hdrColorImage mid-frame, not the
-    // fully-composited swapchain image post-frame) and format (B10G11R11UfloatPack32, matching
+    // fully-composited swapchain image post-frame) and format (_hdrColorFormat, matching
     // _hdrColorImage's own HDR format -- must NOT be _underwaterSourceImage's R8G8B8A8Unorm,
     // since this copies pre-tonemap HDR data water.frag's existing HDR-space math depends on).
     // Created lazily, only on frames where the main-pass split actually runs (RenderFrame's own
@@ -941,7 +942,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private DeviceMemory _depthMemory;
     private ImageView _depthView;
 
-    // Persistent full-resolution HDR scene-colour buffer (B10G11R11UfloatPack32) -- what the main
+    // Persistent full-resolution HDR scene-colour buffer (_hdrColorFormat) -- what the main
     // scene pass (_renderPass) now actually renders into, instead of the swapchain image
     // directly. See VkRenderPass.CreateMainScenePass's own doc comment for why: the swapchain
     // interop image is hard-locked to R8G8B8A8Unorm and can't hold the over-1.0 values bloom/
@@ -954,7 +955,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private ImageView _hdrColorView;
 
     // Bloom ping-pong targets -- half resolution (_bloomSize, tracked separately from
-    // _hdrColorSize/pixelSize), B10G11R11UfloatPack32. See VkTonemapPipeline's own doc comment for
+    // _hdrColorSize/pixelSize), _hdrColorFormat. See VkTonemapPipeline's own doc comment for
     // the 4-stage chain these feed: extract writes Ping, blur-H reads Ping/writes Pong, blur-V
     // reads Pong/writes BACK to Ping (so the final blurred bloom always ends up in Ping -- see
     // VkPostProcessDescriptorSet.UpdateBloomTargets' own note on why TonemapSet's bloom binding
@@ -985,6 +986,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // from an untouched default -- see the SetViewport call sites that push those settings in
     // for why that distinction isn't something this control can make safely on its own).
     private VkGraphicsTier _graphicsTier;
+    // R16G16B16A16Sfloat on macOS: B10G11R11UfloatPack32 maps to MTLPixelFormatRG11B10Float, whose
+    // R/B bit positions are reversed relative to Vulkan's encoding, triggering a MoltenVK swizzle
+    // bug when used as a color attachment (green output). R16G16B16A16Sfloat (MTLPixelFormatRGBA16Float)
+    // has no such ambiguity. Costs 8 bytes/pixel vs 4, acceptable given unified-memory headroom.
+    private Format _hdrColorFormat;
 
     // Tonemap/bloom post-process chain -- when created at all (see _graphicsTier above),
     // it's mandatory the same way _prim/_renderPass are, unlike SSAO/shadows/water/underwater
@@ -2000,15 +2006,22 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             _stats.Initialize(vk);
             _graphicsTier = vk.GraphicsTier;
             // Low: exactly the pre-tonemap contract (writes the swapchain image directly, no
-            // HDR buffer, zero added VRAM). Medium/High: B10G11R11UfloatPack32 offscreen HDR
-            // buffer -- see _hdrColorImage's own field comment for why that format. Either way
-            // every OTHER pipeline built against _renderPass below (_prim/_wireframe/_outline/
-            // sky/water/particles) is unaffected: a Vulkan render pass is just a compatibility
-            // contract these compile against, not something they read layout/format details out
-            // of themselves.
+            // HDR buffer, zero added VRAM). Medium/High: offscreen HDR buffer (format below).
+            // Either way every OTHER pipeline built against _renderPass below (_prim/_wireframe/
+            // _outline/sky/water/particles) is unaffected: a Vulkan render pass is just a
+            // compatibility contract these compile against, not something they read layout/format
+            // details out of themselves.
+            // macOS: the swapchain image uses B8G8R8A8Unorm (BGRA8, native macOS IOSurface format);
+            // see VkInteropSwapchain.cs for why. The Low-tier direct-to-swapchain pass must match.
+            var swapchainFormat = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                ? Format.B8G8R8A8Unorm : Format.R8G8B8A8Unorm;
+            // macOS uses R16G16B16A16Sfloat instead of B10G11R11UfloatPack32 -- see _hdrColorFormat's
+            // own field comment for why.
+            _hdrColorFormat = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                ? Format.R16G16B16A16Sfloat : Format.B10G11R11UfloatPack32;
             _renderPass = _graphicsTier == VkGraphicsTier.Low
-                ? VkRenderPass.CreateMainScenePassDirect(vk, Format.R8G8B8A8Unorm, Format.D32Sfloat)
-                : VkRenderPass.CreateMainScenePass(vk, Format.B10G11R11UfloatPack32, Format.D32Sfloat);
+                ? VkRenderPass.CreateMainScenePassDirect(vk, swapchainFormat, Format.D32Sfloat)
+                : VkRenderPass.CreateMainScenePass(vk, _hdrColorFormat, Format.D32Sfloat);
             // Water-refraction split pair -- Medium/High only (Low has no HDR buffer to split,
             // see _mainScenePassOpaque's own field comment), created unconditionally alongside
             // _renderPass on those tiers even though the split path only actually runs on frames
@@ -2016,8 +2029,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // them" posture as bloom/god-rays' own pipeline construction).
             if (_graphicsTier != VkGraphicsTier.Low)
             {
-                _mainScenePassOpaque = VkRenderPass.CreateMainScenePassOpaque(vk, Format.B10G11R11UfloatPack32, Format.D32Sfloat);
-                _mainScenePassContinuation = VkRenderPass.CreateMainScenePassContinuation(vk, Format.B10G11R11UfloatPack32, Format.D32Sfloat);
+                _mainScenePassOpaque = VkRenderPass.CreateMainScenePassOpaque(vk, _hdrColorFormat, Format.D32Sfloat);
+                _mainScenePassContinuation = VkRenderPass.CreateMainScenePassContinuation(vk, _hdrColorFormat, Format.D32Sfloat);
             }
             _swapchain = new VkInteropSwapchain(vk, interop, _surface, _reapRing);
             _prim = VkPrimPipeline.Create(vk, _renderPass);
@@ -2087,8 +2100,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 // RenderFrame (EnsureHdrColorTarget/EnsureBloomTargets), same split as
                 // _depthImage/EnsureDepthTarget: only the size-independent pipeline/render-pass/
                 // descriptor-set objects are created here.
-                _bloomOffscreenRenderPass = VkRenderPass.CreateOffscreenColorPass(vk, Format.B10G11R11UfloatPack32);
-                _tonemapRenderPass = VkRenderPass.CreateTonemapOutputPass(vk, Format.R8G8B8A8Unorm);
+                _bloomOffscreenRenderPass = VkRenderPass.CreateOffscreenColorPass(vk, _hdrColorFormat);
+                _tonemapRenderPass = VkRenderPass.CreateTonemapOutputPass(vk, swapchainFormat);
                 _bloomExtractPipeline = VkBloomExtractPipeline.Create(vk, _bloomOffscreenRenderPass);
                 _bloomBlurPipeline = VkBloomBlurPipeline.Create(vk, _bloomOffscreenRenderPass);
                 _tonemapPipeline = VkTonemapPipeline.Create(vk, _tonemapRenderPass);
@@ -6747,7 +6760,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// both consumers' descriptor sets below. Mirrors <see cref="EnsureUnderwaterTarget"/>'s own
     /// shape exactly (see its doc comment) -- same "never a render-pass attachment itself, only a
     /// CmdCopyImage destination and a sampled texture" role -- except format
-    /// <c>B10G11R11UfloatPack32</c> (matching <see cref="_hdrColorImage"/>'s own HDR format, not
+    /// <c>_hdrColorFormat</c> (matching <see cref="_hdrColorImage"/>'s own HDR format, not
     /// <see cref="_underwaterSourceImage"/>'s LDR <c>R8G8B8A8Unorm</c>: this copies pre-tonemap
     /// data). Called only from the split-main-pass branch of <c>RenderFrame</c>, i.e. only on
     /// frames where water OR SSR is actually active on Medium/High tier (see
@@ -6762,7 +6775,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         {
             SType = StructureType.ImageCreateInfo,
             ImageType = ImageType.Type2D,
-            Format = Format.B10G11R11UfloatPack32,
+            Format = _hdrColorFormat,
             Extent = new Extent3D((uint)size.Width, (uint)size.Height, 1),
             MipLevels = 1,
             ArrayLayers = 1,
@@ -6787,7 +6800,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             SType = StructureType.ImageViewCreateInfo,
             Image = _opaqueSnapshotImage,
             ViewType = ImageViewType.Type2D,
-            Format = Format.B10G11R11UfloatPack32,
+            Format = _hdrColorFormat,
             SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1)
         };
         vk.Api.CreateImageView(vk.Device, in viewInfo, null, out _opaqueSnapshotView).ThrowOnError();
@@ -8555,18 +8568,15 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         if (_hdrColorSize == size && _hdrColorView.Handle != 0) return;
         DestroyHdrColorTarget(vk);
 
-        // B10G11R11UfloatPack32, not R16G16B16A16Sfloat: 4 bytes/pixel instead of 8, halving this
-        // buffer's VRAM cost. No alpha channel, but nothing downstream needs one -- every
-        // post-process shader that samples this only ever reads .rgb (tonemap.frag/
-        // bloom_extract.frag), and the main pass's own alpha-blended geometry still blends
-        // correctly with no stored destination alpha (the blend equation only needs the
-        // fragment shader's OWN alpha output, not a stored one). Chosen deliberately, not by
-        // default -- see this field's own comment for why the VRAM budget here isn't free money.
+        // Format is _hdrColorFormat: B10G11R11UfloatPack32 on Windows/Linux (4 bytes/pixel,
+        // half the VRAM of R16G16B16A16Sfloat; no alpha needed -- shaders only read .rgb),
+        // R16G16B16A16Sfloat on macOS (avoids a MoltenVK swizzle bug -- see _hdrColorFormat's
+        // field comment). Chosen deliberately, not by default.
         var imageInfo = new ImageCreateInfo
         {
             SType = StructureType.ImageCreateInfo,
             ImageType = ImageType.Type2D,
-            Format = Format.B10G11R11UfloatPack32,
+            Format = _hdrColorFormat,
             Extent = new Extent3D((uint)size.Width, (uint)size.Height, 1),
             MipLevels = 1,
             ArrayLayers = 1,
@@ -8596,7 +8606,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             SType = StructureType.ImageViewCreateInfo,
             Image = _hdrColorImage,
             ViewType = ImageViewType.Type2D,
-            Format = Format.B10G11R11UfloatPack32,
+            Format = _hdrColorFormat,
             SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1)
         };
         vk.Api.CreateImageView(vk.Device, in viewInfo, null, out _hdrColorView).ThrowOnError();
@@ -8635,8 +8645,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         if (_bloomSize == size && _bloomPingView.Handle != 0) return;
         DestroyBloomTargets(vk);
 
-        CreateBloomTarget(vk, size, out _bloomPingImage, out _bloomPingMemory, out _bloomPingView);
-        CreateBloomTarget(vk, size, out _bloomPongImage, out _bloomPongMemory, out _bloomPongView);
+        CreateBloomTarget(vk, size, _hdrColorFormat, out _bloomPingImage, out _bloomPingMemory, out _bloomPingView);
+        CreateBloomTarget(vk, size, _hdrColorFormat, out _bloomPongImage, out _bloomPongMemory, out _bloomPongView);
 
         var pingViewLocal = _bloomPingView;
         var pingFbInfo = new FramebufferCreateInfo
@@ -8671,15 +8681,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _postProcessDescSet!.UpdateBloomTargets(pingInfo, pongInfo);
     }
 
-    private static unsafe void CreateBloomTarget(VkContext vk, PixelSize size, out Image image, out DeviceMemory memory, out ImageView view)
+    private static unsafe void CreateBloomTarget(VkContext vk, PixelSize size, Format hdrFormat, out Image image, out DeviceMemory memory, out ImageView view)
     {
-        // Matches _hdrColorImage's own format choice -- see that image's own comment for why
-        // B10G11R11UfloatPack32 (4 bytes/pixel), not R16G16B16A16Sfloat (8 bytes/pixel).
+        // Matches _hdrColorImage's own format choice (_hdrColorFormat -- see its field comment).
         var imageInfo = new ImageCreateInfo
         {
             SType = StructureType.ImageCreateInfo,
             ImageType = ImageType.Type2D,
-            Format = Format.B10G11R11UfloatPack32,
+            Format = hdrFormat,
             Extent = new Extent3D((uint)size.Width, (uint)size.Height, 1),
             MipLevels = 1,
             ArrayLayers = 1,
@@ -8705,7 +8714,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             SType = StructureType.ImageViewCreateInfo,
             Image = image,
             ViewType = ImageViewType.Type2D,
-            Format = Format.B10G11R11UfloatPack32,
+            Format = hdrFormat,
             SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1)
         };
         vk.Api.CreateImageView(vk.Device, in viewInfo, null, out view).ThrowOnError();
@@ -8728,7 +8737,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>Mirrors <see cref="EnsureBloomTargets"/> exactly (half-resolution,
-    /// B10G11R11UfloatPack32, reuses <see cref="_bloomOffscreenRenderPass"/>'s shape) -- two
+    /// <c>_hdrColorFormat</c>, reuses <see cref="_bloomOffscreenRenderPass"/>'s shape) -- two
     /// dedicated targets (mask output, radial-blur output) rather than a ping-pong pair, since the
     /// god-ray chain is mask -&gt; blur -&gt; done, not separable like bloom's two-pass Gaussian.
     /// Called from the same resize path as <see cref="EnsureBloomTargets"/>, High tier only.</summary>
@@ -8738,8 +8747,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         if (_godRaySize == size && _godRayMaskView.Handle != 0) return;
         DestroyGodRayTargets(vk);
 
-        CreateBloomTarget(vk, size, out _godRayMaskImage, out _godRayMaskMemory, out _godRayMaskView);
-        CreateBloomTarget(vk, size, out _godRayBlurImage, out _godRayBlurMemory, out _godRayBlurView);
+        CreateBloomTarget(vk, size, _hdrColorFormat, out _godRayMaskImage, out _godRayMaskMemory, out _godRayMaskView);
+        CreateBloomTarget(vk, size, _hdrColorFormat, out _godRayBlurImage, out _godRayBlurMemory, out _godRayBlurView);
 
         var maskViewLocal = _godRayMaskView;
         var maskFbInfo = new FramebufferCreateInfo

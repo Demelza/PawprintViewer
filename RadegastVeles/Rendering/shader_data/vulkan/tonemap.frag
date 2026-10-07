@@ -7,7 +7,7 @@ precision highp float;
 // VkRenderPass.CreateTonemapOutputPass's own doc comment for why this pass, not the main pass,
 // owns that role after the HDR buffer was introduced.
 
-layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (B10G11R11UfloatPack32)
+layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (R16G16B16A16Sfloat)
 layout(set = 0, binding = 1) uniform sampler2D uBloomTex;   // half-res, already blurred
 layout(set = 0, binding = 2) uniform sampler2D uGodRayTex;  // half-res, already blurred/streaked
 
@@ -31,7 +31,10 @@ layout(location = 0) out vec4 fragColor;
 const float kBloomIntensity = 0.55;
 
 // Tint for the god-ray contribution -- warm, matching the sun disc rather than a neutral white
-// streak. Modest additive weight for the same "glow, not a wash" reasoning as kBloomIntensity.
+// streak. The mask (godray_mask.frag) outputs a luminance-only brightness value so the final
+// god-ray colour is determined entirely here: kGodRayTint * sunlight-warm, regardless of the
+// sky shader's own colour. Modest additive weight for the same "glow, not a wash" reasoning
+// as kBloomIntensity.
 const vec3  kGodRayTint      = vec3(1.0, 0.92, 0.75);
 const float kGodRayIntensity = 0.9;
 
@@ -57,8 +60,8 @@ vec3 acesFilm(vec3 x)
 void main()
 {
     vec3 hdr    = texture(uSceneColor, vTexCoord).rgb;
-    vec3 bloom  = texture(uBloomTex, vTexCoord).rgb;
-    vec3 godRay = texture(uGodRayTex, vTexCoord).rgb;
+    vec3 bloom  = texture(uBloomTex,   vTexCoord).rgb;
+    vec3 godRay = texture(uGodRayTex,  vTexCoord).rgb;
 
     vec3 combined = hdr + bloom * kBloomIntensity
                         + godRay * kGodRayTint * (kGodRayIntensity * uGodRayIntensity);
