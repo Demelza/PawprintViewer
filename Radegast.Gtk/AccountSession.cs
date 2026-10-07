@@ -43,9 +43,11 @@ internal sealed partial class AccountSession : IDisposable
     public event Action<AccountSession, ScriptMenu>? ScriptDialogReceived;
     public event Action<AccountSession, ScriptQuestionEventArgs>? PermissionRequested;
 
-    public AccountSession(Action<Action>? post = null)
+    public AccountSession(Action<Action>? post = null, AccountSettingsStore? settingsStore = null, TimeProvider? clock = null)
     {
         _post = post ?? GtkDispatch.Post;
+        _settingsStore = settingsStore ?? new AccountSettingsStore();
+        _clock = clock ?? TimeProvider.System;
         _seatAnimations = new SeatAnimationController(Client);
         Outfit = new CurrentOutfitFolder(Client);
         Rlv = new RlvSession(Client, Outfit, _post);
@@ -70,6 +72,7 @@ internal sealed partial class AccountSession : IDisposable
 
     public void Login(string username, string password, Grid grid, StartLocationType startLocation, string mfaToken = "")
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         var parts = username.Trim().Replace('.', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0) throw new ArgumentException("Enter an account name.", nameof(username));
 
@@ -77,6 +80,8 @@ internal sealed partial class AccountSession : IDisposable
         Net.LoginOptions.LastName = parts.Length > 1 ? parts[1] : "Resident";
         Net.LoginOptions.Password = password;
         Net.LoginOptions.Grid = grid;
+        ResetReconnect();
+        LoadAccountSettings();
         Net.LoginOptions.Channel = Program.ViewerName;
         Net.LoginOptions.Version = Program.ViewerVersion;
         Net.LoginOptions.StartLocation = startLocation;
@@ -223,6 +228,7 @@ internal sealed partial class AccountSession : IDisposable
             if (_disposed) return;
             Status = status == LoginStatus.Success ? "Connected" :
                 status == LoginStatus.Failed ? "Login failed" : message;
+            ReconnectOnLoginProgress(status, message, reason);
             if (status == LoginStatus.Success)
             {
                 _friendPresence.Connected();
@@ -255,10 +261,14 @@ internal sealed partial class AccountSession : IDisposable
     }
 
     private void OnDisconnected(object? sender, DisconnectedEventArgs e) =>
-        _post(() => SetDisconnected("Disconnected"));
+        _post(() =>
+        {
+            SetDisconnected("Disconnected");
+            if (!_disposed) ReconnectOnDisconnect(e.Reason != NetworkManager.DisconnectType.ClientInitiated);
+        });
 
     private void OnLoggedOut(object? sender, EventArgs e) =>
-        _post(() => SetDisconnected("Logged out"));
+        _post(() => { ResetReconnect(); SetDisconnected("Logged out"); });
 
     private void SetDisconnected(string status)
     {
@@ -273,7 +283,11 @@ internal sealed partial class AccountSession : IDisposable
         ResetGroupChats();
         _friendPresence.Reset();
         _pendingFriendshipOffers.Clear();
-        lock (_nameLock) _requestedFriendNames.Clear();
+        lock (_nameLock)
+        {
+            _requestedFriendNames.Clear();
+            _requestedNames.Clear();
+        }
         StateChanged?.Invoke(this);
         NearbyChanged?.Invoke(this);
     }
@@ -395,6 +409,7 @@ internal sealed partial class AccountSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        ResetReconnect();
         ResetTeleportOffers();
         StopFriends();
         StopGroupChats();

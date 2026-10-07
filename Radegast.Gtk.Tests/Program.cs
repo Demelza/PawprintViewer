@@ -15,10 +15,16 @@ if (args.Contains("--login-smoke", StringComparer.Ordinal)) return NativeLoginCh
 if (args.Contains("--chat-links-smoke", StringComparer.Ordinal)) return NativeChatLinkChecks.Run();
 if (args.Contains("--profile-text-smoke", StringComparer.Ordinal)) return NativeProfileTextChecks.Run();
 if (args.Contains("--profile-links-smoke", StringComparer.Ordinal)) return NativeProfileLinkChecks.Run();
+if (args.Contains("--account-settings-smoke", StringComparer.Ordinal)) return NativeAccountSettingsChecks.Run();
 
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Reconnect preferences persist per resident/grid, retain defaults and recover from invalid files", ReconnectChecks.Preferences),
+    ("Automatic reconnect waits for its delay, preserves login identity/MFA trust and retries without overlap", ReconnectChecks.TimingAndRetries),
+    ("Logout, closing, disabling and manual login cancel queued reconnects; delay changes reschedule them", ReconnectChecks.CancellationAndChanges),
+    ("Reconnect timers stay account-specific and authentication challenges stop unattended retries", ReconnectChecks.AccountsAndAuthentication),
+    ("Reconnect preferences still apply to the session when saving fails", ReconnectChecks.SaveFailure),
     ("Chat profile links retain punctuation and Unicode and ignore unrelated or malformed URLs", ChatLinkChecks.Parsing),
     ("Chat profile links resolve names once per account and refresh on server name replies", ChatLinkChecks.Names),
     ("Chat profile links open the referenced avatar and enforce name/location restrictions", ChatLinkChecks.Restrictions),

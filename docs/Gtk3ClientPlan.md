@@ -30,7 +30,7 @@ account and connection state.
 - The central tab strip belongs to the selected account. Initial tabs are
   Nearby Chat, Friends, IMs, Group Chats, Inventory, Attachments, Objects, Map,
   and Account Settings. Account Settings currently
-  contains only the existing RLV controls.
+  contains RLV controls and per-account automatic reconnect settings.
 - **Global Settings** is below the add-account button. Notification category
   switches there apply to every account and persist between runs.
 - The right pane always shows nearby avatars for the selected account, ordered
@@ -148,10 +148,34 @@ location restrictions conceal the map and its fields. `tploc`, `tplocal`, and
 seated `unsit` restrictions prevent forbidden manual teleports; pending requests
 also observe new restrictions and disconnects.
 
+## Account Settings and automatic reconnect checkpoint
+
+Account Settings contains the RLV enable/diagnostic controls and an automatic
+reconnect checkbox with a whole-number delay in seconds. The restriction list
+and command status display have been removed. Reconnect is disabled by default,
+with a 30-second default delay (1–86400 seconds). Reconnect preferences are saved
+in separate files per normalized resident name and grid URI under the viewer's
+`account-settings` config directory, with defaults for older or invalid files.
+These files contain preferences only; the current session retains its login
+credentials in memory, and passwords saved by the login dialog stay in the keyring.
+
+Only a previously successful session can reconnect after an unexpected network,
+server or simulator disconnect. It uses the same account/grid and MFA trust hash,
+clears one-time MFA tokens, and requests the last location. Failed connection
+attempts retry after the configured delay without overlapping an active attempt.
+Authentication/TOS/update failures stop retries and require a fresh manual login.
+Changing the delay reschedules pending retries. Disable, logout, viewer shutdown
+and manual login invalidate timers and already queued GTK callbacks. Accounts
+keep their widgets, conversations and drafts. Inventory replaces its store
+subscriptions and clears stale folder request state after the new login.
+Headless checks use a fake clock to cover retry ordering, cancellation, independent
+accounts, authentication challenges and saving failures. The native settings
+check also exercises GTK controls, inventory replacement and logout cleanup.
+
 ## RLV checkpoint
 
-The Account Settings tab shows each account's active RLV restrictions and enable
-switch.
+The Account Settings tab contains each account's RLV enable switch and command
+diagnostic checkbox.
 Inventory, attachment touch, nearby chat, private/group conversations, and
 displayed names/location now use that account's permissions. The shared command
 engine handles inventory queries

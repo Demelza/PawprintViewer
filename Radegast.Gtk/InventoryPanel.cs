@@ -84,6 +84,7 @@ internal sealed class InventoryPanel : Box
     private bool _searching;
     private bool _refreshQueued;
     private bool _disposed;
+    private int _storeGeneration;
 
     private GridClient Client => _session.Client;
     private LibreMetaverse.Inventory? Store => Client.Inventory.Store;
@@ -92,6 +93,7 @@ internal sealed class InventoryPanel : Box
     {
         _session = session;
         _session.Rlv.Changed += OnRestrictionsChanged;
+        _session.StateChanged += OnSessionChanged;
         BorderWidth = 8;
 
         var toolbar = new Box(Orientation.Horizontal, 6);
@@ -183,18 +185,43 @@ internal sealed class InventoryPanel : Box
         Timeout.Add(500, () =>
         {
             if (_disposed) return false;
-            if (Store?.RootFolder == null) return true;
-            AttachStoreEvents();
-            _expanded.Add(Store.RootFolder.UUID);
-            RebuildTree();
-            FetchFolder(Store.RootFolder.UUID, false);
-            _ = Task.Run(async () =>
-            {
-                try { await _session.Outfit.GetCurrentOutfitLinksAsync(CancellationToken.None); }
-                catch { return; }
-                GtkDispatch.Post(() => { if (!_disposed) ScheduleRebuild(); });
-            });
+            if (!_session.IsConnected || Store?.RootFolder == null) return true;
+            LoadStore();
             return false;
+        });
+    }
+
+    private void OnSessionChanged(AccountSession account)
+    {
+        if (_disposed || !_active) return;
+        if (account.IsConnected) LoadStore();
+        else { _storeGeneration++; _searchCancel?.Cancel(); }
+        UpdateDetails();
+    }
+
+    private void LoadStore()
+    {
+        if (Store?.RootFolder == null || Store == _subscribedStore) return;
+        DetachStoreEvents();
+        _storeGeneration++;
+        _searchCancel?.Cancel();
+        _searching = false;
+        _resultsStack.VisibleChildName = "tree";
+        _expanded.Clear();
+        _fetched.Clear();
+        _fetching.Clear();
+        _selectedId = UUID.Zero;
+        _wornIds.Clear();
+        AttachStoreEvents();
+        _expanded.Add(Store.RootFolder.UUID);
+        RebuildTree();
+        FetchFolder(Store.RootFolder.UUID, false);
+        var generation = _storeGeneration;
+        _ = Task.Run(async () =>
+        {
+            try { await _session.Outfit.GetCurrentOutfitLinksAsync(CancellationToken.None); }
+            catch { return; }
+            GtkDispatch.Post(() => { if (!_disposed && generation == _storeGeneration) ScheduleRebuild(); });
         });
     }
 
@@ -339,6 +366,7 @@ internal sealed class InventoryPanel : Box
         if (_disposed || !_session.IsConnected || Store == null) return;
         if (_fetching.Contains(folderId) || (!force && _fetched.Contains(folderId))) return;
         _fetching.Add(folderId);
+        var generation = _storeGeneration;
         _status.Text = "Loading folder…";
         var owner = isLibrary ? GetLibraryOwner() : Client.Self.AgentID;
         if (owner == UUID.Zero)
@@ -358,7 +386,7 @@ internal sealed class InventoryPanel : Box
                     await Client.Inventory.RequestFolderContentsAsync(folderId, owner, true, true, InventorySortOrder.ByName);
                 GtkDispatch.Post(() =>
                 {
-                    if (_disposed) return;
+                    if (_disposed || generation != _storeGeneration) return;
                     _fetching.Remove(folderId);
                     _fetched.Add(folderId);
                     _status.Text = "Inventory ready";
@@ -369,7 +397,7 @@ internal sealed class InventoryPanel : Box
             {
                 GtkDispatch.Post(() =>
                 {
-                    if (_disposed) return;
+                    if (_disposed || generation != _storeGeneration) return;
                     _fetching.Remove(folderId);
                     _status.Text = $"Could not load folder: {ex.Message}";
                 });
@@ -993,6 +1021,7 @@ internal sealed class InventoryPanel : Box
         if (_disposed) return;
         _disposed = true;
         _session.Rlv.Changed -= OnRestrictionsChanged;
+        _session.StateChanged -= OnSessionChanged;
         _searchCancel?.Cancel();
         _searchCancel?.Dispose();
         if (_active)
@@ -1002,11 +1031,17 @@ internal sealed class InventoryPanel : Box
             Client.Appearance.AppearanceSet -= OnAppearanceChanged;
             Client.Appearance.AgentWearablesReply -= OnWearablesChanged;
         }
+        DetachStoreEvents();
+    }
+
+    private void DetachStoreEvents()
+    {
         if (_subscribedStore != null)
         {
             _subscribedStore.InventoryObjectAdded -= OnObjectAdded;
             _subscribedStore.InventoryObjectRemoved -= OnObjectRemoved;
             _subscribedStore.InventoryObjectUpdated -= OnObjectUpdated;
+            _subscribedStore = null;
         }
     }
 

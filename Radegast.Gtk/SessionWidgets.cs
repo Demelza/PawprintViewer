@@ -20,7 +20,7 @@ internal sealed class SessionWidgets : IDisposable
     private readonly GroupChatsPanel _groupPanel;
     private readonly Label _groupTabLabel = new("Group Chats");
     private bool _selectedAccount;
-    private readonly RlvPanel _rlvPanel;
+    private readonly AccountSettingsPanel _settingsPanel;
     private readonly Stack _inventoryPages = new();
     private readonly Label _locationLabel = new() { Xalign = 0, MarginStart = 8, Ellipsize = Pango.EllipsizeMode.End };
     private readonly Label _balanceLabel = new() { Xalign = 0, MarginStart = 8, Ellipsize = Pango.EllipsizeMode.End };
@@ -104,8 +104,8 @@ internal sealed class SessionWidgets : IDisposable
         Tabs.AppendPage(_objectsPanel, new Label("Objects"));
         _mapPanel = new MapPanel(session);
         Tabs.AppendPage(_mapPanel, new Label("Map"));
-        _rlvPanel = new RlvPanel(session.Rlv);
-        Tabs.AppendPage(_rlvPanel, new Label("Account Settings"));
+        _settingsPanel = new AccountSettingsPanel(session);
+        Tabs.AppendPage(_settingsPanel, new Label("Account Settings"));
         session.Rlv.Changed += UpdateRestrictions;
         session.ConversationChanged += OnConversationChanged;
         session.GroupConversationChanged += OnGroupConversationChanged;
@@ -269,7 +269,7 @@ internal sealed class SessionWidgets : IDisposable
         _friendsPanel.ImRequested -= OpenInstantMessages;
         _imPanel.Stop();
         _groupPanel.Stop();
-        _rlvPanel.Stop();
+        _settingsPanel.Stop();
         _inventoryPanel.Stop();
         _attachmentsPanel.Stop();
         _friendsPanel.Stop();

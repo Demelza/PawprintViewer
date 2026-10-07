@@ -206,8 +206,23 @@ and a password-save failure is reported in that account's Nearby Chat.
   pending prompts.
 - Common system folders stay at the top of My Inventory; the Type column uses
   20% of the inventory list, and the fixed details pane uses 25% of the view.
-- Per-account RLV/RLVa support, with an Account Settings tab for enabling it,
-  inspecting active restrictions, and optionally showing command diagnostics in chat.
+- **Account Settings** contains settings only: RLV/RLVa enable and chat diagnostics,
+  plus **Automatically reconnect after a disconnection** and **Reconnect delay
+  (seconds)**. The active restriction list has been removed. Reconnect is off by
+  default; its default delay is 30 seconds, adjustable from 1 to 86400 seconds.
+  Preferences are saved per account and grid in
+  `$XDG_CONFIG_HOME/pawprint-viewer/account-settings/` (normally
+  `~/.config/pawprint-viewer/account-settings/`).
+  After an unexpected disconnect, the account stays in the left list and retries
+  using its current login credentials at its last location. Failed connection
+  attempts wait for the same delay before retrying; attempts never overlap.
+  Changing the delay reschedules a pending retry. Disabling reconnect, logging
+  out or closing the viewer cancels pending retries, including callbacks already
+  queued for the UI. Initial failed logins do not start reconnects. Authentication
+  challenges or rejected credentials stop retries and ask for a fresh login;
+  one-time MFA codes are never replayed. Reconnect keeps the current account's
+  conversations/drafts and refreshes its inventory cache. These preference files
+  contain no passwords; reconnect uses the credentials already held in memory.
 - Script permission requests open separate Allow/Deny windows. RLV permission
   rules can deny requests or automatically accept animation, attachment, and
   control permissions; other permissions still require an explicit response.
@@ -289,6 +304,14 @@ It uses temporary account metadata and a fake keyring; no grid login is needed:
 
 ```sh
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --login-smoke
+```
+
+The Account Settings check simulates disconnects and advances a fake clock to
+test the controls, preference saving, reconnect status, inventory cache
+replacement and logout cleanup without a grid login:
+
+```sh
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --account-settings-smoke
 ```
 
 The native chat-link check tests name resolution in all three chat tabs and both
