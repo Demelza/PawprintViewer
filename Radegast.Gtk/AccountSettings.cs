@@ -5,13 +5,25 @@ namespace Radegast.Gtk;
 internal sealed record AccountSettings
 {
     public const int MaximumDelaySeconds = 86400;
+    public const int MaximumReturnDelayMinutes = 1440;
     public bool AutoReconnect { get; init; }
     public int ReconnectDelaySeconds { get; init; } = 30;
+    public bool TeleportOnRegionRestart { get; init; }
+    public string RestartDestinationRegion { get; init; } = "";
+    public float RestartDestinationX { get; init; } = 128;
+    public float RestartDestinationY { get; init; } = 128;
+    public float RestartDestinationZ { get; init; } = 25;
+    public int ReturnDelayMinutes { get; init; } = 5;
 
     public void Validate()
     {
         if (ReconnectDelaySeconds is < 1 or > MaximumDelaySeconds)
             throw new ArgumentOutOfRangeException(nameof(ReconnectDelaySeconds), "Reconnect delay must be between 1 and 86400 seconds.");
+        if (ReturnDelayMinutes is < 1 or > MaximumReturnDelayMinutes)
+            throw new ArgumentOutOfRangeException(nameof(ReturnDelayMinutes), "Return delay must be between 1 and 1440 minutes.");
+        if (RestartDestinationRegion == null || new[] { RestartDestinationX, RestartDestinationY, RestartDestinationZ }
+            .Any(value => !float.IsFinite(value) || value < 0 || value > 65535))
+            throw new ArgumentOutOfRangeException(nameof(RestartDestinationRegion), "Enter a region and coordinates between 0 and 65535.");
     }
 }
 

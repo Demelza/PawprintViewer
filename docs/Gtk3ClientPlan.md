@@ -187,6 +187,33 @@ HTTP appearance textures remain enabled. A regression check exercises real SDK
 login subscribers and three timeout shutdown/reconnect cycles, confirming that
 the texture task stays absent and automatic reconnect still runs.
 
+## Region restart teleport checkpoint
+
+Account Settings now includes an optional **Teleport on region restart** switch,
+a temporary region with local X/Y/Z coordinates, and a return delay in minutes
+(default 5, range 1–1440). Settings persist per resident/grid; older preference
+files retain their reconnect values and leave this feature disabled. The settings
+panel scrolls when its controls exceed the available height.
+
+The adapter recognizes structured `RegionRestartMinutes`/`RegionRestartSeconds`
+simulator alerts, checking both the sending simulator and the named region.
+Chat and neighbouring-region warnings cannot trigger recovery. A single trip
+captures the original region handle and position, resolves the temporary region,
+rejects a destination in the same region, and awaits server-confirmed teleport.
+The return delay starts only after arrival. Return failure schedules one retry
+per minute; duplicate warnings and outstanding requests never overlap. RLV
+teleport/unsit restrictions apply, independently of world-map visibility.
+
+Turning the feature off, leaving the temporary region, disconnecting, manual
+login, or disposing the account cancels timers and active work. Trip identities
+and timer generations prevent queued callbacks from reviving a cancelled return.
+Return delay edits reschedule a waiting trip; destination edits affect the next
+restart. Editing restart preferences leaves an existing reconnect deadline intact.
+Headless checks cover persistence, malformed alerts, timing after arrival,
+retry spacing, cancellation, independent accounts, SDK teleport packets and
+server confirmation. The native account settings check covers the new GTK
+controls and saving them alongside reconnect preferences.
+
 ## RLV checkpoint
 
 The Account Settings tab contains each account's RLV enable switch and command

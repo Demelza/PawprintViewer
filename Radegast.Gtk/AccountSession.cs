@@ -1,5 +1,6 @@
 using LibreMetaverse;
 using LibreMetaverse.Appearance;
+using LibreMetaverse.Packets;
 using Radegast;
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -53,6 +54,9 @@ internal sealed partial class AccountSession : IDisposable
         _post = post ?? GtkDispatch.Post;
         _settingsStore = settingsStore ?? new AccountSettingsStore();
         _clock = clock ?? TimeProvider.System;
+        _restartRecovery = new RegionRestartRecovery(_clock, _post, CurrentRestartLocation, FindRestartDestinationAsync,
+            (region, position, token) => TeleportLocationAsync(region, position, false, token));
+        _restartRecovery.Changed += OnRegionRestartChanged;
         _seatAnimations = new SeatAnimationController(Client);
         Outfit = new CurrentOutfitFolder(Client);
         Rlv = new RlvSession(Client, Outfit, _post);
@@ -67,10 +71,13 @@ internal sealed partial class AccountSession : IDisposable
         Client.Self.ScriptDialog += OnScriptDialog;
         Client.Self.ScriptQuestion += OnScriptQuestion;
         Client.Self.IM += OnInstantMessage;
+        Client.Self.TeleportProgress += OnRestartTeleportProgress;
         Client.Self.MuteListUpdated += OnBlockListUpdated;
         Client.Grid.CoarseLocationUpdate += OnCoarseLocationUpdate;
         Client.Avatars.UUIDNameReply += OnNameReply;
         Client.Network.RegisterLoginResponseCallback(OnLoginResponse);
+        Client.Network.RegisterCallback(PacketType.AlertMessage, OnRegionRestartAlert);
+        Client.Network.SimChanged += OnRestartSimChanged;
         InitializeFriends();
         InitializeGroupChats();
     }
@@ -86,6 +93,7 @@ internal sealed partial class AccountSession : IDisposable
         Net.LoginOptions.Password = password;
         Net.LoginOptions.Grid = grid;
         ResetReconnect();
+        _restartRecovery.Cancel("Pending return cancelled by a new login.");
         LoadAccountSettings();
         Net.LoginOptions.Channel = Program.ViewerName;
         Net.LoginOptions.Version = Program.ViewerVersion;
@@ -279,6 +287,8 @@ internal sealed partial class AccountSession : IDisposable
     {
         if (_disposed) return;
         Status = status;
+        Interlocked.Exchange(ref _serverTeleportBusyUntil, 0);
+        _restartRecovery.Disconnected();
         var enabled = Rlv.Enabled;
         Rlv.SetEnabled(false);
         if (enabled) Rlv.SetEnabled(true);
@@ -415,6 +425,8 @@ internal sealed partial class AccountSession : IDisposable
         if (_disposed) return;
         _disposed = true;
         ResetReconnect();
+        _restartRecovery.Changed -= OnRegionRestartChanged;
+        _restartRecovery.Dispose();
         ResetTeleportOffers();
         StopFriends();
         StopGroupChats();
@@ -428,10 +440,13 @@ internal sealed partial class AccountSession : IDisposable
         Client.Self.ScriptDialog -= OnScriptDialog;
         Client.Self.ScriptQuestion -= OnScriptQuestion;
         Client.Self.IM -= OnInstantMessage;
+        Client.Self.TeleportProgress -= OnRestartTeleportProgress;
         Client.Self.MuteListUpdated -= OnBlockListUpdated;
         Client.Grid.CoarseLocationUpdate -= OnCoarseLocationUpdate;
         Client.Avatars.UUIDNameReply -= OnNameReply;
         Client.Network.UnregisterLoginResponseCallback(OnLoginResponse);
+        Client.Network.UnregisterCallback(PacketType.AlertMessage, OnRegionRestartAlert);
+        Client.Network.SimChanged -= OnRestartSimChanged;
         Rlv.Dispose();
         _seatAnimations.Dispose();
         Outfit.Dispose();

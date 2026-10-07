@@ -50,6 +50,7 @@ internal sealed partial class AccountSession
         _loginIdentity = identity;
         Settings = _settingsStore.Load(identity, out var error);
         SettingsError = error;
+        _restartRecovery.UpdateSettings(Settings);
         SettingsChanged?.Invoke(this);
     }
 
@@ -57,10 +58,12 @@ internal sealed partial class AccountSession
     {
         if (_disposed) return;
         settings.Validate();
-        var changed = Settings != settings;
+        var reconnectChanged = Settings.AutoReconnect != settings.AutoReconnect ||
+            Settings.ReconnectDelaySeconds != settings.ReconnectDelaySeconds;
         Settings = settings;
         SettingsError = null;
-        if (changed)
+        _restartRecovery.UpdateSettings(settings);
+        if (reconnectChanged)
         {
             CancelReconnectTimer();
             if (_reconnectNeeded && !_reconnecting)

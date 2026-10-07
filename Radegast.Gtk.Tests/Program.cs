@@ -20,6 +20,11 @@ if (args.Contains("--account-settings-smoke", StringComparer.Ordinal)) return Na
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Region restart settings persist per account and recognize only structured warnings for the current region", RegionRestartChecks.PreferencesAndWarnings),
+    ("Restart teleports retain the original location, wait after arrival and retry unavailable regions once per minute", RegionRestartChecks.TimingAndRetries),
+    ("Restart returns cancel stale callbacks, reschedule delay changes and stay isolated from other accounts and reconnects", RegionRestartChecks.CancellationAndIsolation),
+    ("Failed or cancelled restart departures never schedule a return and reject destinations in the same region", RegionRestartChecks.FailedDepartureAndStaleCompletion),
+    ("Server restart packets teleport the correct account to its destination and back, respecting RLV and server confirmation", RegionRestartChecks.AccountPacketsAndPermissions),
     ("Repeated SDK login/shutdown events keep the unused texture worker stopped and preserve automatic reconnect", ReconnectChecks.TextureWorkerLifecycle),
     ("The reconnect test action shuts down only its account's network and obeys the reconnect setting/delay", ReconnectChecks.ForcedDisconnect),
     ("Reconnect preferences persist per resident/grid, retain defaults and recover from invalid files", ReconnectChecks.Preferences),

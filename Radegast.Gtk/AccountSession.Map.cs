@@ -10,6 +10,7 @@ internal sealed partial class AccountSession
 {
     private readonly ConcurrentDictionary<Simulator, KeyValuePair<UUID, Vector3>[]> _mapAvatarPositions = new();
     private int _mapTeleportInProgress;
+    private long _serverTeleportBusyUntil;
     public Uri? MapTileServer { get; private set; }
     public bool CanViewWorldMap => !Rlv.Enabled ||
         (Rlv.Service.Permissions.CanShowWorldMap() && Rlv.Service.Permissions.CanShowLoc());
@@ -83,11 +84,13 @@ internal sealed partial class AccountSession
         return region;
     }
 
-    public string? MapTeleportError(GridRegion region, Vector3 position)
+    public string? MapTeleportError(GridRegion region, Vector3 position) => LocationTeleportError(region, position, true);
+
+    private string? LocationTeleportError(GridRegion region, Vector3 position, bool requireMap)
     {
         if (_disposed || !IsConnected || Client.Network.CurrentSim is not { } sim)
             return "This account is disconnected.";
-        if (!CanViewWorldMap) return "The map is hidden by RLV.";
+        if (requireMap && !CanViewWorldMap) return "The map is hidden by RLV.";
         if (string.IsNullOrWhiteSpace(region.Name) || region.Access == SimAccess.NonExistent)
             return "Select an existing region.";
         var sizeX = region.RegionHandle == sim.Handle ? sim.SizeX : 256;
@@ -107,21 +110,26 @@ internal sealed partial class AccountSession
         return null;
     }
 
-    public async Task TeleportMapAsync(GridRegion region, Vector3 position, CancellationToken token = default)
+    public Task TeleportMapAsync(GridRegion region, Vector3 position, CancellationToken token = default) =>
+        TeleportLocationAsync(region, position, true, token);
+
+    private async Task TeleportLocationAsync(GridRegion region, Vector3 position, bool requireMap, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (MapTeleportError(region, position) is { } error) throw new InvalidOperationException(error);
+        if (LocationTeleportError(region, position, requireMap) is { } error) throw new InvalidOperationException(error);
+        if (Interlocked.Read(ref _serverTeleportBusyUntil) > _clock.GetUtcNow().UtcTicks)
+            throw new InvalidOperationException("A teleport request is already pending.");
         if (Interlocked.CompareExchange(ref _mapTeleportInProgress, 1, 0) != 0)
             throw new InvalidOperationException("A teleport request is already pending.");
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(token);
         void Disconnected(object? sender, DisconnectedEventArgs e) => cancel.Cancel();
-        void RestrictionsChanged() { if (MapTeleportError(region, position) != null) cancel.Cancel(); }
+        void RestrictionsChanged() { if (LocationTeleportError(region, position, requireMap) != null) cancel.Cancel(); }
         Client.Network.Disconnected += Disconnected;
         Rlv.Changed += RestrictionsChanged;
         try
         {
             cancel.Token.ThrowIfCancellationRequested();
-            if (MapTeleportError(region, position) is { } changed) throw new InvalidOperationException(changed);
+            if (LocationTeleportError(region, position, requireMap) is { } changed) throw new InvalidOperationException(changed);
             if (!await Client.Self.TeleportAsync(region.RegionHandle, position, cancel.Token).ConfigureAwait(false))
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(Client.Self.TeleportMessage)
                     ? "The server did not complete the teleport." : Client.Self.TeleportMessage);
@@ -131,6 +139,7 @@ internal sealed partial class AccountSession
             Client.Network.Disconnected -= Disconnected;
             Rlv.Changed -= RestrictionsChanged;
             Interlocked.Exchange(ref _mapTeleportInProgress, 0);
+            Interlocked.Exchange(ref _serverTeleportBusyUntil, 0);
         }
     }
 }

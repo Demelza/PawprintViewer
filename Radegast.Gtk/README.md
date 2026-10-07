@@ -230,6 +230,18 @@ and a password-save failure is reported in that account's Nearby Chat.
   The unused UDP scene texture worker is disabled: LibreMetaverse 3.1.5 otherwise
   restarts it with a cancelled delay token after reconnect, causing an idle CPU
   spike. World-map tile downloads and HTTP appearance textures stay enabled.
+- **Teleport on region restart** in Account Settings is off by default. Set a
+  temporary **region**, **X/Y/Z**, and **Return delay (minutes)** (default 5,
+  range 1–1440). Preferences are saved for this account and grid. On the first
+  structured restart warning from the current region's server, the avatar
+  teleports to that destination, which must be in a different region. The return
+  timer starts after confirmed arrival and requests the original region and
+  exact position. Failed return attempts retry once a minute without overlap.
+  The status below the controls reports progress or failures. RLV teleport and
+  seat restrictions apply. Changing the return delay reschedules a waiting
+  return; destination edits apply to future restart warnings. Turning the
+  setting off, moving to another region, disconnecting, logging out, or closing
+  the viewer cancels the pending return, including queued UI callbacks.
 - Script permission requests open separate Allow/Deny windows. RLV permission
   rules can deny requests or automatically accept animation, attachment, and
   control permissions; other permissions still require an explicit response.
@@ -314,8 +326,8 @@ G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tes
 ```
 
 The Account Settings check simulates disconnects and advances a fake clock to
-test the controls, preference saving, reconnect status, inventory cache
-replacement and logout cleanup without a grid login:
+test the reconnect and restart destination/delay controls, preference saving,
+reconnect status, inventory cache replacement and logout cleanup without a grid login:
 
 ```sh
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --account-settings-smoke

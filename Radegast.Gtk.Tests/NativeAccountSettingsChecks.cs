@@ -19,6 +19,12 @@ internal static class NativeAccountSettingsChecks
         var reconnect = Field<CheckButton>(panel, "_reconnect");
         var delay = Field<SpinButton>(panel, "_delay");
         var disconnect = Field<Button>(panel, "_testDisconnect");
+        var restart = Field<CheckButton>(panel, "_restartTeleport");
+        var restartRegion = Field<Entry>(panel, "_restartRegion");
+        var restartX = Field<SpinButton>(panel, "_restartX");
+        var restartY = Field<SpinButton>(panel, "_restartY");
+        var restartZ = Field<SpinButton>(panel, "_restartZ");
+        var returnDelay = Field<SpinButton>(panel, "_returnDelay");
         var inventory = Field<InventoryPanel>(widgets, "_inventoryPanel");
         var staleFolder = UUID.Random();
         LibreMetaverse.Inventory? replacement = null;
@@ -34,6 +40,8 @@ internal static class NativeAccountSettingsChecks
                         Check(!reconnect.Active && delay.ValueAsInt == 30 && !delay.Sensitive && disconnect.Sensitive &&
                             !Descendants(panel).Any(child => child is TreeView), "Account Settings retained the restriction list or had incorrect reconnect defaults");
                         Check(((Label)widgets.Tabs.GetTabLabel(panel)).Text == "Account Settings", "The settings tab was renamed or moved");
+                        Check(!restart.Active && !restartRegion.Sensitive && !returnDelay.Sensitive && returnDelay.ValueAsInt == 5,
+                            "Restart protection was enabled by default or had incorrect control defaults");
                         inventory.StartLoading();
                         reconnect.Active = true;
                         delay.Value = 2;
@@ -44,6 +52,23 @@ internal static class NativeAccountSettingsChecks
                         rlv.Active = false;
                         Check(!h.Account.Rlv.Enabled, "The RLV enable control stopped working");
                         rlv.Active = true;
+                        restart.Active = true;
+                        restartRegion.Text = "Safe Region";
+                        restartX.Value = 45.5;
+                        restartY.Value = 67;
+                        restartZ.Value = 901;
+                        returnDelay.Value = 12;
+                        Check(restartRegion.Sensitive && restartX.Sensitive && returnDelay.Sensitive &&
+                            h.Account.Settings.TeleportOnRegionRestart && h.Account.Settings.RestartDestinationRegion == "Safe Region" &&
+                            h.Account.Settings.RestartDestinationX == 45.5f && h.Account.Settings.RestartDestinationY == 67 &&
+                            h.Account.Settings.RestartDestinationZ == 901 && h.Account.Settings.ReturnDelayMinutes == 12 &&
+                            h.Store.Load(new SavedLogin(h.Name, h.Grid.LoginURI), out _) == h.Account.Settings &&
+                            Field<Label>(panel, "_restartStatus").Text.StartsWith("Waiting"),
+                            "Restart controls did not apply/persist their settings or update their status");
+                        restart.Active = false;
+                        Check(!restartRegion.Sensitive && !h.Account.Settings.TeleportOnRegionRestart,
+                            "Turning restart protection off left its controls active");
+                        restart.Active = true;
                         disconnect.Click();
                         Check(!disconnect.Sensitive, "The test disconnect button permitted duplicate requests");
                         break;
@@ -83,7 +108,7 @@ internal static class NativeAccountSettingsChecks
                     case 6:
                         GC.Collect(); GC.WaitForPendingFinalizers();
                         Check(h.Attempts == 2, "A removed account reconnected through a queued GTK callback");
-                        Console.WriteLine("PASS native GTK account settings, preference saving, RLV controls, reconnect status, inventory replacement and logout cleanup");
+                        Console.WriteLine("PASS native GTK account settings, restart destination/delay controls, preference saving, RLV controls, reconnect status, inventory replacement and logout cleanup");
                         Application.Quit();
                         return false;
                 }
