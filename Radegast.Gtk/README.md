@@ -232,16 +232,19 @@ and a password-save failure is reported in that account's Nearby Chat.
   spike. World-map tile downloads and HTTP appearance textures stay enabled.
 - **Teleport on region restart** in Account Settings is off by default. Set a
   temporary **region**, **X/Y/Z**, and **Return delay (minutes)** (default 5,
-  range 1–1440). Preferences are saved for this account and grid. On the first
-  structured restart warning from the current region's server, the avatar
+  range 1–1440). Preferences are saved for this account and grid. Structured
+  restart warnings from the current region's server schedule departure when
+  **60 seconds remain**. Later warnings refine that countdown; a warning with
+  60 seconds or less remaining triggers immediate departure. The avatar
   teleports to that destination, which must be in a different region. The return
   timer starts after confirmed arrival and requests the original region and
-  exact position. Failed return attempts retry once a minute without overlap.
+  exact position captured when leaving. Failed return attempts retry once a
+  minute without overlap.
   The status below the controls reports progress or failures. RLV teleport and
   seat restrictions apply. Changing the return delay reschedules a waiting
-  return; destination edits apply to future restart warnings. Turning the
+  return; destination edits apply to the next departure. Turning the
   setting off, moving to another region, disconnecting, logging out, or closing
-  the viewer cancels the pending return, including queued UI callbacks.
+  the viewer cancels pending departures and returns, including queued UI callbacks.
 - Script permission requests open separate Allow/Deny windows. RLV permission
   rules can deny requests or automatically accept animation, attachment, and
   control permissions; other permissions still require an explicit response.

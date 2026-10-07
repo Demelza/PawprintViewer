@@ -38,17 +38,60 @@ internal sealed class RegionRestartRecovery : IDisposable
             ? "Enter a temporary destination region." : "Waiting for a region restart warning.");
     }
 
-    public void ObserveRestart(ulong regionHandle)
+    public void ObserveRestart(ulong regionHandle, TimeSpan remaining)
     {
-        if (_disposed || !_settings.TeleportOnRegionRestart || _trip != null ||
+        if (_disposed || !_settings.TeleportOnRegionRestart ||
             _location() is not { } origin || origin.Region.RegionHandle != regionHandle) return;
+        if (_trip is { } active && (active.Phase != Phase.Scheduled || active.Origin.Region.RegionHandle != regionHandle)) return;
         if (string.IsNullOrWhiteSpace(_settings.RestartDestinationRegion))
         {
-            SetStatus("Cannot leave: enter a temporary destination region.");
+            Cancel("Cannot leave: enter a temporary destination region.");
             return;
         }
-        var trip = new Trip(origin);
+        var trip = _trip ?? new Trip(origin);
         _trip = trip;
+        // Each server warning refines the countdown, including a postponed restart.
+        trip.DepartureReportedAt = _clock.GetTimestamp();
+        trip.DepartureDelay = remaining - TimeSpan.FromSeconds(60);
+        ScheduleDeparture(trip);
+    }
+
+    private void ScheduleDeparture(Trip trip)
+    {
+        trip.Timer?.Dispose(); trip.Timer = null;
+        var generation = ++trip.TimerGeneration;
+        trip.Phase = Phase.Scheduled;
+        var delay = trip.DepartureDelay - _clock.GetElapsedTime(trip.DepartureReportedAt);
+        if (delay <= TimeSpan.Zero) { BeginDeparture(trip, generation); return; }
+        // Bound unusually long server countdowns to the native timer's supported range.
+        // The callback checks the remaining time again before permitting departure.
+        var due = TimeSpan.FromMilliseconds(Math.Max(1, Math.Ceiling(Math.Min(delay.TotalMilliseconds, TimeSpan.FromDays(1).TotalMilliseconds))));
+        trip.Timer = _clock.CreateTimer(_ => _post(() => BeginDeparture(trip, generation)), null,
+            due, Timeout.InfiniteTimeSpan);
+        SetStatus("Restart detected. Waiting until 60 seconds remain before teleporting.");
+    }
+
+    private void BeginDeparture(Trip trip, int generation)
+    {
+        if (!IsCurrent(trip) || generation != trip.TimerGeneration || trip.Phase != Phase.Scheduled) return;
+        LocationChanged();
+        if (!IsCurrent(trip)) return;
+        if (trip.DepartureDelay > _clock.GetElapsedTime(trip.DepartureReportedAt))
+        {
+            ScheduleDeparture(trip);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_settings.RestartDestinationRegion))
+        {
+            Cancel("Cannot leave: enter a temporary destination region.");
+            return;
+        }
+        trip.Timer?.Dispose(); trip.Timer = null;
+        // Capture the position when leaving, so walking during the countdown does
+        // not send the avatar back to where the first warning was received.
+        if (_location() is not { } origin) { Disconnected(); return; }
+        trip.Origin = origin;
+        trip.Phase = Phase.Leaving;
         SetStatus("Restart detected. Teleporting to the temporary destination…");
         _ = LeaveAsync(trip, _settings);
     }
@@ -125,16 +168,21 @@ internal sealed class RegionRestartRecovery : IDisposable
 
     public void LocationChanged()
     {
-        if (_disposed || _trip is not { Phase: Phase.Waiting } trip) return;
+        if (_disposed || _trip is not { } trip) return;
         var current = _location();
-        if (current?.Region.RegionHandle == trip.Origin.Region.RegionHandle) Cancel("Returned to the original region.");
-        else if (current?.Region.RegionHandle != trip.TemporaryRegion)
-            Cancel("The avatar left the temporary region. Return cancelled.");
+        if (trip.Phase == Phase.Scheduled && current?.Region.RegionHandle != trip.Origin.Region.RegionHandle)
+            Cancel("The avatar left the restarting region. Scheduled teleport cancelled.");
+        else if (trip.Phase == Phase.Waiting)
+        {
+            if (current?.Region.RegionHandle == trip.Origin.Region.RegionHandle) Cancel("Returned to the original region.");
+            else if (current?.Region.RegionHandle != trip.TemporaryRegion)
+                Cancel("The avatar left the temporary region. Return cancelled.");
+        }
     }
 
     public void Disconnected()
     {
-        if (!_disposed && _trip != null) Cancel("Disconnected. Pending return cancelled.");
+        if (!_disposed && _trip != null) Cancel("Disconnected. Pending restart teleport cancelled.");
     }
 
     public void Cancel(string status)
@@ -149,16 +197,18 @@ internal sealed class RegionRestartRecovery : IDisposable
     private void SetStatus(string status) { Status = status; Changed?.Invoke(); }
     public void Dispose() { _disposed = true; Cancel(""); }
 
-    private enum Phase { Leaving, Waiting, Returning }
+    private enum Phase { Scheduled, Leaving, Waiting, Returning }
     private sealed class Trip : IDisposable
     {
         private readonly CancellationTokenSource _cancel = new();
-        public RestartLocation Origin { get; }
+        public RestartLocation Origin { get; set; }
         public CancellationToken Token { get; }
         public Trip(RestartLocation origin) { Origin = origin; Token = _cancel.Token; }
         public ulong TemporaryRegion;
         public Phase Phase;
         public int TimerGeneration;
+        public long DepartureReportedAt;
+        public TimeSpan DepartureDelay;
         public ITimer? Timer;
         public void Dispose()
         {

@@ -21,6 +21,8 @@ if (args.Contains("--account-settings-smoke", StringComparer.Ordinal)) return Na
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("Region restart settings persist per account and recognize only structured warnings for the current region", RegionRestartChecks.PreferencesAndWarnings),
+    ("Restart departure waits until 60 seconds remain, refines countdown updates and captures the position when leaving", RegionRestartChecks.DepartureCountdown),
+    ("Disabling restart recovery, disconnecting, changing regions or closing cancels queued departures", RegionRestartChecks.DepartureCancellation),
     ("Restart teleports retain the original location, wait after arrival and retry unavailable regions once per minute", RegionRestartChecks.TimingAndRetries),
     ("Restart returns cancel stale callbacks, reschedule delay changes and stay isolated from other accounts and reconnects", RegionRestartChecks.CancellationAndIsolation),
     ("Failed or cancelled restart departures never schedule a return and reject destinations in the same region", RegionRestartChecks.FailedDepartureAndStaleCompletion),

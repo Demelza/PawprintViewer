@@ -42,15 +42,18 @@ internal sealed partial class AccountSession
     {
         var sim = e.Simulator;
         if (sim != Client.Network.CurrentSim || e.Packet is not AlertMessagePacket alert ||
-            !IsRegionRestartWarning(alert, sim.Name)) return;
+            !TryGetRegionRestartCountdown(alert, sim.Name, out var remaining)) return;
+        var reportedAt = _clock.GetTimestamp();
         _post(() =>
         {
-            if (!_disposed && sim == Client.Network.CurrentSim) _restartRecovery.ObserveRestart(sim.Handle);
+            if (!_disposed && sim == Client.Network.CurrentSim)
+                _restartRecovery.ObserveRestart(sim.Handle, remaining - _clock.GetElapsedTime(reportedAt));
         });
     }
 
-    internal static bool IsRegionRestartWarning(AlertMessagePacket alert, string regionName)
+    internal static bool TryGetRegionRestartCountdown(AlertMessagePacket alert, string regionName, out TimeSpan remainingTime)
     {
+        remainingTime = TimeSpan.Zero;
         // The structured simulator alert is authoritative; object chat and other
         // messages containing the word "restart" cannot initiate a teleport.
         if (alert.AlertInfo == null) return false;
@@ -66,7 +69,10 @@ internal sealed partial class AccountSession
                     data.TryGetValue("NAME", out var name) && string.Equals(name.AsString(), regionName, StringComparison.OrdinalIgnoreCase) &&
                     data.TryGetValue(units, out var remaining) &&
                     int.TryParse(remaining.AsString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) && count >= 0)
+                {
+                    remainingTime = TimeSpan.FromSeconds((long)count * (units == "MINUTES" ? 60 : 1));
                     return true;
+                }
             }
             catch { /* A malformed alert is not a restart warning. */ }
         }

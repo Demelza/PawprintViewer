@@ -64,7 +64,7 @@ internal sealed class AccountSettingsPanel : ScrolledWindow
         returnRow.PackStart(new Label("Return delay (minutes)") { Xalign = 0 }, false, false, 0);
         returnRow.PackStart(_returnDelay, false, false, 0);
         content.PackStart(returnRow, false, false, 0);
-        content.PackStart(new Label("Leave on a server restart warning, then return to the original position after this delay. " +
+        content.PackStart(new Label("Leave when 60 seconds remain on the server's restart countdown, then return to the original position after this delay. " +
             "The delay starts on arrival. Failed returns retry once a minute. Moving to another region, disconnecting, " +
             "or turning this off cancels the return. RLV teleport restrictions apply.")
             { Xalign = 0, LineWrap = true }, false, false, 0);

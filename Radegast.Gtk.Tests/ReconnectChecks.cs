@@ -264,6 +264,9 @@ internal sealed class ReconnectHarness : IDisposable
 internal sealed class ReconnectClock : TimeProvider
 {
     private TimeSpan _elapsed;
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+    public override long GetTimestamp() => _elapsed.Ticks;
+    public override DateTimeOffset GetUtcNow() => DateTimeOffset.UnixEpoch + _elapsed;
     private readonly List<Timer> _timers = new();
     public int PendingTimers => _timers.Count(timer => timer.Due != null);
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
