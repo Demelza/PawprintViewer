@@ -171,6 +171,11 @@ subscriptions and clears stale folder request state after the new login.
 Headless checks use a fake clock to cover retry ordering, cancellation, independent
 accounts, authentication challenges and saving failures. The native settings
 check also exercises GTK controls, inventory replacement and logout cleanup.
+The **Disconnect to test reconnect** button closes the selected account's actual
+network connections through the SDK timeout shutdown path, which raises the
+normal disconnect event and schedules recovery if enabled. It retains the
+account's widgets and preferences and is disabled during/disconnected after the
+request, then re-enabled on connection. The logout action still cancels retries.
 
 ## RLV checkpoint
 

@@ -6,6 +6,29 @@ using GridDefinition = Radegast.Grid;
 
 internal static class ReconnectChecks
 {
+    public static async Task ForcedDisconnect()
+    {
+        using var first = new ReconnectHarness();
+        using var second = new ReconnectHarness(name: "Bob Resident");
+        first.Account.UpdateSettings(new() { AutoReconnect = true, ReconnectDelaySeconds = 3 });
+        first.Connect(); second.Connect();
+        Check(first.Account.CanTestDisconnect, "The test action was unavailable to a connected account");
+        await first.Account.DisconnectForReconnectTestAsync();
+        Check(!first.Account.IsConnected && !first.Account.Client.Network.Connected &&
+            first.Account.Client.Network.Simulators.Count == 0 && second.Account.IsConnected &&
+            first.Clock.PendingTimers == 1 && !first.Account.CanTestDisconnect,
+            "Test disconnect did not shut down the real network, affected another account or skipped reconnect");
+        await first.Account.DisconnectForReconnectTestAsync();
+        first.Clock.Advance(2);
+        Check(first.Attempts == 1, "Test disconnect skipped the configured delay");
+        first.Clock.Advance(1);
+        Check(first.Attempts == 2, "Test disconnect was treated as intentional logout");
+        await second.Account.DisconnectForReconnectTestAsync();
+        second.Clock.Advance(50);
+        Check(!second.Account.IsConnected && second.Clock.PendingTimers == 0 && second.Attempts == 1,
+            "Test disconnect enabled reconnect for an account whose setting was disabled");
+    }
+
     public static Task Preferences()
     {
         var directory = Path.Combine(Path.GetTempPath(), "pawprint-reconnect-settings-" + Guid.NewGuid().ToString("N"));

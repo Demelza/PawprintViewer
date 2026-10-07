@@ -11,10 +11,37 @@ internal sealed partial class AccountSession
     private ITimer? _reconnectTimer;
     private int _reconnectGeneration;
     private bool _hadSuccessfulLogin, _reconnectNeeded, _reconnecting, _reconnectBlocked;
+    private bool _testDisconnecting;
 
     public AccountSettings Settings { get; private set; } = new();
     public string? SettingsError { get; private set; }
     public event Action<AccountSession>? SettingsChanged;
+    public bool CanTestDisconnect => !_disposed && IsConnected && !Net.IsLoggingIn && !_testDisconnecting;
+
+    public async Task DisconnectForReconnectTestAsync()
+    {
+        if (!CanTestDisconnect) return;
+        _testDisconnecting = true;
+        Status = "Disconnecting to test reconnect…";
+        StateChanged?.Invoke(this);
+        try
+        {
+            // Close the actual connections and let the normal disconnected event
+            // drive cleanup/reconnect. A timeout reason keeps this distinct from
+            // the Logout action, which deliberately cancels automatic reconnect.
+            await Task.Run(() => Client.Network.ShutdownAsync(NetworkManager.DisconnectType.NetworkTimeout,
+                "Disconnected to test automatic reconnect")).ConfigureAwait(false);
+        }
+        finally
+        {
+            _post(() =>
+            {
+                if (_disposed) return;
+                _testDisconnecting = false;
+                StateChanged?.Invoke(this);
+            });
+        }
+    }
 
     private void LoadAccountSettings()
     {

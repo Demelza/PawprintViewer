@@ -18,6 +18,7 @@ internal static class NativeAccountSettingsChecks
         var panel = Field<AccountSettingsPanel>(widgets, "_settingsPanel");
         var reconnect = Field<CheckButton>(panel, "_reconnect");
         var delay = Field<SpinButton>(panel, "_delay");
+        var disconnect = Field<Button>(panel, "_testDisconnect");
         var inventory = Field<InventoryPanel>(widgets, "_inventoryPanel");
         var staleFolder = UUID.Random();
         LibreMetaverse.Inventory? replacement = null;
@@ -30,7 +31,7 @@ internal static class NativeAccountSettingsChecks
                 switch (stage++)
                 {
                     case 0:
-                        Check(!reconnect.Active && delay.ValueAsInt == 30 && !delay.Sensitive &&
+                        Check(!reconnect.Active && delay.ValueAsInt == 30 && !delay.Sensitive && disconnect.Sensitive &&
                             !Descendants(panel).Any(child => child is TreeView), "Account Settings retained the restriction list or had incorrect reconnect defaults");
                         Check(((Label)widgets.Tabs.GetTabLabel(panel)).Text == "Account Settings", "The settings tab was renamed or moved");
                         inventory.StartLoading();
@@ -43,10 +44,12 @@ internal static class NativeAccountSettingsChecks
                         rlv.Active = false;
                         Check(!h.Account.Rlv.Enabled, "The RLV enable control stopped working");
                         rlv.Active = true;
-                        h.Disconnect();
+                        disconnect.Click();
+                        Check(!disconnect.Sensitive, "The test disconnect button permitted duplicate requests");
                         break;
                     case 1:
                         Check(!h.Account.IsConnected && h.Account.Status.Contains("reconnect scheduled"), "The disconnected account was removed or lost its retry status");
+                        Check(!disconnect.Sensitive, "The test disconnect button remained active while disconnected");
                         h.Clock.Advance(1);
                         Check(h.Attempts == 1, "The GTK session reconnected before its configured delay");
                         break;
@@ -67,7 +70,8 @@ internal static class NativeAccountSettingsChecks
                         break;
                     case 4:
                         Check(h.Account.IsConnected && Field<LibreMetaverse.Inventory>(inventory, "_subscribedStore") == replacement &&
-                            !Field<HashSet<UUID>>(inventory, "_fetched").Contains(staleFolder), "Inventory retained the previous login's cache after reconnect");
+                            !Field<HashSet<UUID>>(inventory, "_fetched").Contains(staleFolder) && disconnect.Sensitive,
+                            "Inventory or test button did not refresh after reconnect");
                         h.Disconnect();
                         break;
                     case 5:

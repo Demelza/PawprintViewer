@@ -223,6 +223,10 @@ and a password-save failure is reported in that account's Nearby Chat.
   one-time MFA codes are never replayed. Reconnect keeps the current account's
   conversations/drafts and refreshes its inventory cache. These preference files
   contain no passwords; reconnect uses the credentials already held in memory.
+  **Disconnect to test reconnect** closes that account's connections while
+  leaving it in the left list. Enable automatic reconnect and set the delay
+  before clicking it to test recovery. With reconnect disabled, it stays
+  disconnected. The button is unavailable while disconnected or disconnecting.
 - Script permission requests open separate Allow/Deny windows. RLV permission
   rules can deny requests or automatically accept animation, attachment, and
   control permissions; other permissions still require an explicit response.
