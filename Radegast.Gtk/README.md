@@ -82,10 +82,10 @@ and a password-save failure is reported in that account's Nearby Chat.
   entire grid. RLV nearby-avatar restrictions hide these markers.
   Failed image downloads retry quietly without an error overlay on the map.
 - **Global Settings**, below **+ Add account**, controls silent desktop popups
-  for IMs, Group Chats, Worn Objects, Menus, friends going online/offline, and
-  Teleport Offers. All six are enabled initially. Changes apply to every account
-  and are saved
-  in `$XDG_CONFIG_HOME/pawprint-viewer/settings.json` (normally
+  for IMs, Group Chats, Worn Objects, Menus, friends going online/offline,
+  Teleport Offers, and Sim Restarts. All seven are enabled initially. Changes
+  apply to every account and are saved in
+  `$XDG_CONFIG_HOME/pawprint-viewer/settings.json` (normally
   `~/.config/pawprint-viewer/settings.json`). **Test notification** checks delivery.
   Linux desktop popups use the system's `libnotify` runtime and notification daemon.
 - Messages already being viewed in the foreground stay quiet. Background menus
@@ -105,6 +105,13 @@ and a password-save failure is reported in that account's Nearby Chat.
   First presence replies during the first 10 seconds after login establish a
   silent baseline. Further changes for an observed friend notify immediately;
   friends initially offline can produce login notifications after that period.
+- **Sim Restarts** popups show **Sim restart** above the remaining time (for
+  example, **5 minutes remaining**). The first server warning notifies immediately,
+  then reminders appear once per minute while the avatar remains in that region.
+  Later warnings update the countdown without duplicating popups. Reminders stop
+  when the countdown expires, the avatar leaves the region, or the account
+  disconnects. This notification switch is independent of **Teleport on region
+  restart** in Account Settings.
 - Incoming teleport offers open an account-specific window saying
   **[sender] wants to teleport you to their location.** **Accept** starts the
   offered teleport; **Refuse** or closing the window declines it. Background

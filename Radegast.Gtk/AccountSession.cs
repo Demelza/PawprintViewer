@@ -54,6 +54,9 @@ internal sealed partial class AccountSession : IDisposable
         _post = post ?? GtkDispatch.Post;
         _settingsStore = settingsStore ?? new AccountSettingsStore();
         _clock = clock ?? TimeProvider.System;
+        _restartNotifications = new RegionRestartNotifications(_clock, _post,
+            () => !_disposed && IsConnected ? Client.Network.CurrentSim?.Handle : null,
+            remaining => Notify(NotificationCategory.SimRestarts, "Sim restart", remaining, UUID.Zero));
         _restartRecovery = new RegionRestartRecovery(_clock, _post, CurrentRestartLocation, FindRestartDestinationAsync,
             (region, position, token) => TeleportLocationAsync(region, position, false, token));
         _restartRecovery.Changed += OnRegionRestartChanged;
@@ -94,6 +97,7 @@ internal sealed partial class AccountSession : IDisposable
         Net.LoginOptions.Grid = grid;
         ResetReconnect();
         _restartRecovery.Cancel("Pending return cancelled by a new login.");
+        _restartNotifications.Cancel();
         LoadAccountSettings();
         Net.LoginOptions.Channel = Program.ViewerName;
         Net.LoginOptions.Version = Program.ViewerVersion;
@@ -289,6 +293,7 @@ internal sealed partial class AccountSession : IDisposable
         Status = status;
         Interlocked.Exchange(ref _serverTeleportBusyUntil, 0);
         _restartRecovery.Disconnected();
+        _restartNotifications.Cancel();
         var enabled = Rlv.Enabled;
         Rlv.SetEnabled(false);
         if (enabled) Rlv.SetEnabled(true);
@@ -427,6 +432,7 @@ internal sealed partial class AccountSession : IDisposable
         ResetReconnect();
         _restartRecovery.Changed -= OnRegionRestartChanged;
         _restartRecovery.Dispose();
+        _restartNotifications.Dispose();
         ResetTeleportOffers();
         StopFriends();
         StopGroupChats();

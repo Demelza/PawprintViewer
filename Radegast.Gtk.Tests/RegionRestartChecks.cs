@@ -261,7 +261,7 @@ internal static class RegionRestartChecks
         await WaitUntil(() => Field<Queue<Action>>(h, "_posts").Count > 0);
         h.Clock.Advance(200); // Time passes before GTK processes the warning.
         h.HoldPosts = false; h.DrainPosts();
-        Check(h.Clock.PendingTimers == 1 && packets().Count == 0, "A five-minute warning teleported immediately");
+        Check(h.Clock.PendingTimers == 2 && packets().Count == 0, "A five-minute warning teleported immediately or failed to schedule reminders");
         h.Clock.Advance(39);
         Check(packets().Count == 0, "A queued warning ignored elapsed time or started departure too early");
         h.Account.Client.Self.RelativePosition = new(15, 25, 35);
@@ -280,8 +280,8 @@ internal static class RegionRestartChecks
         await WaitUntil(() => (request ??= packets().OfType<TeleportLocationRequestPacket>().SingleOrDefault()) != null);
         Check(request!.AgentData.AgentID == f.Owner && request.Info.RegionHandle == safe.Handle && request.Info.Position == new Vector3(45, 55, 65),
             "Departure used a wrong account/destination or a hidden map blocked automation");
-        Check(h.Clock.PendingTimers == 0, "Return was scheduled without server confirmation");
-        h.Account.Client.Network.CurrentSim = safe;
+        Check(h.Clock.PendingTimers == 1, "Return was scheduled without server confirmation");
+        ChangeSim(h.Account, safe);
         f.Receive(LocalTeleport(f.Owner, new(45, 55, 65)), safe);
         await WaitUntil(() => h.Clock.PendingTimers == 1);
         h.Clock.Advance(119);
@@ -292,7 +292,7 @@ internal static class RegionRestartChecks
         await WaitUntil(() => (request ??= packets().OfType<TeleportLocationRequestPacket>().SingleOrDefault()) != null);
         Check(request!.Info.RegionHandle == f.Simulator.Handle && request.Info.Position == new Vector3(15, 25, 35),
             "Return forgot the original region or exact coordinates");
-        h.Account.Client.Network.CurrentSim = f.Simulator;
+        ChangeSim(h.Account, f.Simulator);
         f.Receive(LocalTeleport(f.Owner, new(15, 25, 35)));
         await WaitUntil(() => h.Account.RestartTeleportStatus.StartsWith("Returned"));
         Check(h.Clock.PendingTimers == 0 && !otherPackets().OfType<TeleportLocationRequestPacket>().Any(),
@@ -304,6 +304,13 @@ internal static class RegionRestartChecks
     private static void QueueRunning(AccountSession account, Simulator sim) => typeof(NetworkManager)
         .GetMethod("OnEventQueueRunning", BindingFlags.Instance | BindingFlags.NonPublic)!
         .Invoke(account.Client.Network, new object[] { new EventQueueRunningEventArgs(sim) });
+    internal static void ChangeSim(AccountSession account, Simulator sim)
+    {
+        var previous = account.Client.Network.CurrentSim;
+        account.Client.Network.CurrentSim = sim;
+        typeof(NetworkManager).GetMethod("OnSimChanged", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(account.Client.Network, new object[] { new SimChangedEventArgs(previous) });
+    }
     internal static AlertMessagePacket Warning(string name, string units = "Minutes", int count = 1) => new()
     {
         AlertData = { Message = Utils.StringToBytes("Region restart warning") },

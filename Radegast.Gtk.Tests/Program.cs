@@ -20,6 +20,9 @@ if (args.Contains("--account-settings-smoke", StringComparer.Ordinal)) return Na
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Sim restart reminders notify once per minute with live remaining time and no duplicate or stale popups", RegionRestartNotificationChecks.TimingAndUpdates),
+    ("Changing regions, disconnecting, cancelling or disposing stops queued sim restart reminders", RegionRestartNotificationChecks.Cancellation),
+    ("Structured restart alerts notify independently of restart teleports, obey global switches and stay account-specific", RegionRestartNotificationChecks.PacketsAndPreferences),
     ("Region restart settings persist per account and recognize only structured warnings for the current region", RegionRestartChecks.PreferencesAndWarnings),
     ("Restart departure waits until 60 seconds remain, refines countdown updates and captures the position when leaving", RegionRestartChecks.DepartureCountdown),
     ("Disabling restart recovery, disconnecting, changing regions or closing cancels queued departures", RegionRestartChecks.DepartureCancellation),
@@ -67,12 +70,12 @@ var tests = new (string Name, Func<Task> Run)[]
         {
             var settings = new GlobalSettings(path);
             Check(Enum.GetValues<NotificationCategory>().All(settings.Value.IsEnabled), "Missing settings did not use defaults");
-            settings.Update(new NotificationSettings { InstantMessages = false, WornObjects = false, Friends = false });
+            settings.Update(new NotificationSettings { InstantMessages = false, WornObjects = false, Friends = false, SimRestarts = false });
             var restored = new GlobalSettings(path);
             Check(restored.Value == settings.Value && restored.LoadError == null, "Notification switches did not survive reopening");
             File.WriteAllText(path, "{\"Menus\":false,\"FutureSetting\":42}");
             var partial = new GlobalSettings(path);
-            Check(!partial.Value.Menus && partial.Value.InstantMessages && partial.Value.Friends && partial.Value.TeleportOffers,
+            Check(!partial.Value.Menus && partial.Value.InstantMessages && partial.Value.Friends && partial.Value.TeleportOffers && partial.Value.SimRestarts,
                 "An older settings file disabled categories it did not contain");
             File.WriteAllText(path, "broken json");
             var broken = new GlobalSettings(path);

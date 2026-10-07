@@ -10,7 +10,8 @@ internal static class NativeAccountSettingsChecks
         Application.Init();
         using var h = new ReconnectHarness(post: GtkDispatch.Post);
         h.Connect();
-        using var main = new MainWindow(new GlobalSettings(Path.Combine(h.DirectoryPath, "global.json")), new Notices());
+        var globalSettings = new GlobalSettings(Path.Combine(h.DirectoryPath, "global.json"));
+        using var main = new MainWindow(globalSettings, new Notices());
         Invoke(main, "AddSession", h.Account);
         main.ShowAll();
         var sessions = Field<Dictionary<AccountSession, SessionWidgets>>(main, "_sessions");
@@ -37,6 +38,15 @@ internal static class NativeAccountSettingsChecks
                 switch (stage++)
                 {
                     case 0:
+                        var globalWindow = new GlobalSettingsWindow(main, globalSettings, Field<NotificationController>(main, "_notifications"));
+                        globalWindow.ShowAll();
+                        var restartNotices = Descendants(globalWindow).OfType<CheckButton>().Single(toggle => toggle.Label == "Sim Restarts");
+                        Check(restartNotices.Active, "Sim restart notifications were not enabled by default");
+                        restartNotices.Active = false;
+                        Check(!globalSettings.Value.SimRestarts && !new GlobalSettings(globalSettings.FilePath).Value.SimRestarts,
+                            "The sim restart checkbox did not apply and save its value");
+                        restartNotices.Active = true;
+                        globalWindow.CloseSettings();
                         Check(!reconnect.Active && delay.ValueAsInt == 30 && !delay.Sensitive && disconnect.Sensitive &&
                             !Descendants(panel).Any(child => child is TreeView), "Account Settings retained the restriction list or had incorrect reconnect defaults");
                         Check(((Label)widgets.Tabs.GetTabLabel(panel)).Text == "Account Settings", "The settings tab was renamed or moved");
@@ -108,7 +118,7 @@ internal static class NativeAccountSettingsChecks
                     case 6:
                         GC.Collect(); GC.WaitForPendingFinalizers();
                         Check(h.Attempts == 2, "A removed account reconnected through a queued GTK callback");
-                        Console.WriteLine("PASS native GTK account settings, restart destination/delay controls, preference saving, RLV controls, reconnect status, inventory replacement and logout cleanup");
+                        Console.WriteLine("PASS native GTK global restart notification checkbox, account settings, restart destination/delay controls, preference saving, RLV controls, reconnect status, inventory replacement and logout cleanup");
                         Application.Quit();
                         return false;
                 }

@@ -259,11 +259,22 @@ window available, and foreground decisions follow normal notification suppressio
 
 Global Settings has switches for incoming private IMs, group chats, private
 owner-say/directed chat from worn objects, object menus/text prompts, friend
-online/offline transitions, and teleport offers. Preferences use the XDG
-configuration directory and
+online/offline transitions, teleport offers, and sim restarts. Preferences use
+the XDG configuration directory and
 apply immediately. Initial friend presence, outgoing chat, typing, group echoes,
 and RLV commands are excluded. Message content follows RLV receive and display
 rules. A test button provides a manual desktop notification.
+
+Sim restart popups use `Sim restart` as the title and the remaining time as
+the preview. Structured current-region alerts start per-account reminders,
+independently of automatic restart teleports. The first warning notifies
+immediately; one-shot timers repeat once per minute using monotonic elapsed time.
+Later alerts refine the countdown, while timer generations reject stale queued
+callbacks and prevent duplicate popups. Region changes, disconnects, new logins,
+account disposal, and countdown expiry stop reminders. The global switch applies
+immediately and clears existing restart popups. Headless checks cover timing,
+updates, queued callbacks, account isolation and settings; the native settings
+check covers the checkbox and persistence.
 
 The login buddy list contains no online statuses. First status replies within
 10 seconds of connecting establish a silent baseline, including multiple initial

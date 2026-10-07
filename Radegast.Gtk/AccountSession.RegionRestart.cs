@@ -8,6 +8,7 @@ namespace Radegast.Gtk;
 internal sealed partial class AccountSession
 {
     private readonly RegionRestartRecovery _restartRecovery;
+    private readonly RegionRestartNotifications _restartNotifications;
     public string RestartTeleportStatus => RedactText(_restartRecovery.Status);
     public event Action<AccountSession>? RestartTeleportChanged;
 
@@ -36,7 +37,12 @@ internal sealed partial class AccountSession
         Interlocked.Exchange(ref _serverTeleportBusyUntil, e.Status is TeleportStatus.Start or TeleportStatus.Progress
             ? _clock.GetUtcNow().AddMilliseconds(Client.Settings.Timing.TeleportTimeout).UtcTicks : 0);
     private void OnRestartSimChanged(object? sender, SimChangedEventArgs e) =>
-        _post(() => { if (!_disposed) _restartRecovery.LocationChanged(); });
+        _post(() =>
+        {
+            if (_disposed) return;
+            _restartRecovery.LocationChanged();
+            _restartNotifications.LocationChanged();
+        });
 
     private void OnRegionRestartAlert(object? sender, PacketReceivedEventArgs e)
     {
@@ -46,8 +52,10 @@ internal sealed partial class AccountSession
         var reportedAt = _clock.GetTimestamp();
         _post(() =>
         {
-            if (!_disposed && sim == Client.Network.CurrentSim)
-                _restartRecovery.ObserveRestart(sim.Handle, remaining - _clock.GetElapsedTime(reportedAt));
+            if (_disposed || !IsConnected || sim != Client.Network.CurrentSim) return;
+            var countdown = remaining - _clock.GetElapsedTime(reportedAt);
+            _restartNotifications.ObserveRestart(sim.Handle, countdown);
+            _restartRecovery.ObserveRestart(sim.Handle, countdown);
         });
     }
 
