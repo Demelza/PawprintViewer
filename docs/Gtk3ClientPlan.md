@@ -177,6 +177,16 @@ normal disconnect event and schedules recovery if enabled. It retains the
 account's widgets and preferences and is disabled during/disconnected after the
 request, then re-enabled on connection. The logout action still cancels retries.
 
+The GTK account disables LibreMetaverse 3.1.5's unused UDP scene texture pipeline
+before login. Its shutdown cancels a token that startup never replaces; after
+reconnect the master loop catches each cancelled delay and spins continuously,
+even with no texture requests. An isolated SDK reproduction measured about
+10 ms of CPU per second before reconnect and 1055 ms per second afterward,
+returning to idle on shutdown. Map tiles use their separate HTTP service and
+HTTP appearance textures remain enabled. A regression check exercises real SDK
+login subscribers and three timeout shutdown/reconnect cycles, confirming that
+the texture task stays absent and automatic reconnect still runs.
+
 ## RLV checkpoint
 
 The Account Settings tab contains each account's RLV enable switch and command

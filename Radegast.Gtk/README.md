@@ -227,6 +227,9 @@ and a password-save failure is reported in that account's Nearby Chat.
   leaving it in the left list. Enable automatic reconnect and set the delay
   before clicking it to test recovery. With reconnect disabled, it stays
   disconnected. The button is unavailable while disconnected or disconnecting.
+  The unused UDP scene texture worker is disabled: LibreMetaverse 3.1.5 otherwise
+  restarts it with a cancelled delay token after reconnect, causing an idle CPU
+  spike. World-map tile downloads and HTTP appearance textures stay enabled.
 - Script permission requests open separate Allow/Deny windows. RLV permission
   rules can deny requests or automatically accept animation, attachment, and
   control permissions; other permissions still require an explicit response.

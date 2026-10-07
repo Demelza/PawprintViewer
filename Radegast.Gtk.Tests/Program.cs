@@ -20,6 +20,7 @@ if (args.Contains("--account-settings-smoke", StringComparer.Ordinal)) return Na
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Repeated SDK login/shutdown events keep the unused texture worker stopped and preserve automatic reconnect", ReconnectChecks.TextureWorkerLifecycle),
     ("The reconnect test action shuts down only its account's network and obeys the reconnect setting/delay", ReconnectChecks.ForcedDisconnect),
     ("Reconnect preferences persist per resident/grid, retain defaults and recover from invalid files", ReconnectChecks.Preferences),
     ("Automatic reconnect waits for its delay, preserves login identity/MFA trust and retries without overlap", ReconnectChecks.TimingAndRetries),

@@ -6,6 +6,45 @@ using GridDefinition = Radegast.Grid;
 
 internal static class ReconnectChecks
 {
+    public static async Task TextureWorkerLifecycle()
+    {
+        using var h = new ReconnectHarness();
+        h.Account.UpdateSettings(new() { AutoReconnect = true, ReconnectDelaySeconds = 1 });
+        var client = h.Account.Client;
+        client.Settings.Agent.SendUpdates = false;
+        var pipeline = (TexturePipeline)typeof(AssetManager)
+            .GetField("Texture", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client.Assets)!;
+        var workerField = typeof(TexturePipeline).GetField("downloadMasterTask", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var loginProgress = typeof(NetworkManager).GetMethod("OnLoginProgress", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        try
+        {
+            for (var cycle = 0; cycle < 3; cycle++)
+            {
+                h.Fixture.CapturePackets();
+                // Exercise the SDK login subscribers, including its real texture
+                // pipeline. The usual harness connects at the NetCom layer only.
+                loginProgress.Invoke(client.Network, new object[] { new LoginProgressEventArgs(LoginStatus.Success, "Synthetic login", "") });
+                Check(h.Account.IsConnected, "The SDK success event did not connect the account");
+                var worker = (Task?)workerField.GetValue(pipeline);
+                if (cycle > 0)
+                    Check(worker == null, "Reconnect started the unused UDP texture worker with its cancelled delay token");
+                Check(client.Settings.TexturePipeline.UseHttpTextures, "The fix disabled HTTP textures used for appearance");
+                await h.Account.DisconnectForReconnectTestAsync();
+                if (worker != null) await worker.WaitAsync(TimeSpan.FromSeconds(2));
+                h.Clock.Advance(1);
+                Check(h.Attempts == cycle + 2, "SDK shutdown stopped automatic reconnect");
+            }
+        }
+        finally
+        {
+            // Also stop the real SDK task when running this check against the old,
+            // faulty implementation, so a failing test cannot leave a busy loop.
+            var worker = (Task?)workerField.GetValue(pipeline);
+            pipeline.Shutdown();
+            if (worker != null) await worker.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+    }
+
     public static async Task ForcedDisconnect()
     {
         using var first = new ReconnectHarness();

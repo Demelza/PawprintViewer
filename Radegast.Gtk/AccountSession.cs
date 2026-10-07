@@ -45,6 +45,11 @@ internal sealed partial class AccountSession : IDisposable
 
     public AccountSession(Action<Action>? post = null, AccountSettingsStore? settingsStore = null, TimeProvider? clock = null)
     {
+        // This client has no scene textures; map tiles use their own HTTP source.
+        // LibreMetaverse 3.1.5 restarts its UDP texture loop with a cancelled
+        // delay token after reconnect, spinning at full CPU even with no requests.
+        // Disable that unused worker before the first SDK login event.
+        Client.Settings.TexturePipeline.Enabled = false;
         _post = post ?? GtkDispatch.Post;
         _settingsStore = settingsStore ?? new AccountSettingsStore();
         _clock = clock ?? TimeProvider.System;
