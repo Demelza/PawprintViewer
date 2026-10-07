@@ -129,6 +129,11 @@ and a password-save failure is reported in that account's Nearby Chat.
   remain separate for each account and resident. Conversations, the IM tab, and
   the account rail show unread counts; displaying a conversation marks it read.
   Histories and drafts are kept in memory for the current login only.
+- To keep long sessions lightweight, Nearby Chat retains the newest **2,000
+  messages**, and each IM/group conversation retains up to **2,000 messages**.
+  A **1,000,000-character** budget per history can shorten that further for long
+  messages. Older messages leave the in-memory history; chat is not archived to
+  disk. Unsent drafts are preserved. Profile text is displayed in full.
 - IMs request offline delivery and retrieve stored offline messages after login.
   Private messages keep channel prefixes such as `/9` as literal text; channel
   commands belong in Nearby Chat.
@@ -341,6 +346,16 @@ reconnect status, inventory cache replacement and logout cleanup without a grid 
 
 ```sh
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --account-settings-smoke
+```
+
+The native memory check simulates repeated nearby updates, row departures,
+Friends/Attachments refreshes, rolling chat retention, and account removal.
+It reports resident/managed memory, verifies native widget cleanup, and checks
+that group chat continues displaying new messages after history reaches its
+limit. It requires a display and does not log in to a grid:
+
+```sh
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --memory-smoke
 ```
 
 The native chat-link check tests name resolution in all three chat tabs and both

@@ -388,7 +388,10 @@ Enter also sends. Friends' IM buttons open/select their conversations; incoming
 resident messages create conversations without changing the selected one.
 Each account keeps its own conversations, histories, selection, and per-resident
 drafts while switching tabs and accounts. This state stays in memory for the
-current login; persistent message logs are not implemented.
+current login; persistent message logs are not implemented. Each conversation
+retains the newest 2,000 messages within a 1,000,000-character text budget.
+Nearby Chat uses the same count/text limits; profile text remains complete.
+Stream indices keep the renderer advancing after old messages are removed.
 
 Unread counts appear beside conversations, on the IM tab, and in the account
 rail. Only the displayed conversation of the selected account is marked read.
@@ -427,6 +430,28 @@ after joining. Group chat send/receive rules use RLV group UUID/name exceptions,
 including `allgroups`; sender names and locations follow the display restrictions.
 Conference chats, group notices, and group membership/role administration remain
 outside this checkpoint.
+
+## Memory checkpoint
+
+Nearby updates retain one GTK row per resident and update its name/distance
+instead of replacing the entire list. Departures dispose the row and its
+children. Friends, Attachments, inventory search and conversation removal use
+the same subtree cleanup, including button signal handlers and managed/native
+toggle references. Logout stops subscriptions before releasing all three account
+widget trees.
+
+Chat models and visible buffers have count/text budgets. Removing old lines
+also removes unused link tags and name references. GTK character offsets come
+from the rendered text, preserving multiline messages and Unicode. Profile
+`SetText` remains complete. The native memory check exercises repeated updates,
+row disposal, friend actions, link-tag eviction, rolling group messages, and
+logout with fatal GTK reference warnings enabled. Headless checks cover count
+and character limits, drafts and Unicode.
+
+The synthetic 40-resident/400-update reproduction retained about 111 MiB before
+the fix even after collection, compared with about 5–6 MiB of growth afterwards.
+These measurements cover the reproduced UI leak, rather than a live multi-hour
+grid session.
 
 ## First working checkpoint
 

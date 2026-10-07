@@ -275,21 +275,29 @@ internal static class RegionRestartChecks
             Data = new[] { new MapBlockReplyPacket.DataBlock { Name = Utils.StringToBytes("Safe"), X = 1001, Y = 1200, Access = (byte)SimAccess.PG } }
         });
         await WaitUntil(() => Field<int>(h.Account, "_mapTeleportInProgress") == 1);
-        QueueRunning(h.Account, f.Simulator);
         TeleportLocationRequestPacket? request = null;
-        await WaitUntil(() => (request ??= packets().OfType<TeleportLocationRequestPacket>().SingleOrDefault()) != null);
+        await WaitUntil(() =>
+        {
+            // The synthetic simulator has no running Caps queue to query. Repeat
+            // its ready event until the SDK has installed its async queue waiter.
+            QueueRunning(h.Account, f.Simulator);
+            return (request ??= packets().OfType<TeleportLocationRequestPacket>().SingleOrDefault()) != null;
+        });
         Check(request!.AgentData.AgentID == f.Owner && request.Info.RegionHandle == safe.Handle && request.Info.Position == new Vector3(45, 55, 65),
             "Departure used a wrong account/destination or a hidden map blocked automation");
         Check(h.Clock.PendingTimers == 1, "Return was scheduled without server confirmation");
         ChangeSim(h.Account, safe);
         f.Receive(LocalTeleport(f.Owner, new(45, 55, 65)), safe);
-        await WaitUntil(() => h.Clock.PendingTimers == 1);
+        await WaitUntil(() => h.Account.RestartTeleportStatus.StartsWith("At the temporary destination") && h.Clock.PendingTimers == 1);
         h.Clock.Advance(119);
         Check(!packets().OfType<TeleportLocationRequestPacket>().Any(), "Return preceded the configured delay");
         h.Clock.Advance(1);
-        QueueRunning(h.Account, safe);
         request = null;
-        await WaitUntil(() => (request ??= packets().OfType<TeleportLocationRequestPacket>().SingleOrDefault()) != null);
+        await WaitUntil(() =>
+        {
+            QueueRunning(h.Account, safe);
+            return (request ??= packets().OfType<TeleportLocationRequestPacket>().SingleOrDefault()) != null;
+        });
         Check(request!.Info.RegionHandle == f.Simulator.Handle && request.Info.Position == new Vector3(15, 25, 35),
             "Return forgot the original region or exact coordinates");
         ChangeSim(h.Account, f.Simulator);

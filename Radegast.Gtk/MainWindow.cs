@@ -162,9 +162,9 @@ internal sealed class MainWindow : Window
         if (_profiles.Remove(session, out var profiles))
             foreach (var profile in profiles.Values.ToArray()) profile.CloseProfile();
         widgets.Dispose();
-        _accountRows.Remove(widgets.AccountRow);
-        _pages.Remove(widgets.Root);
-        _nearbyPages.Remove(widgets.NearbyPane);
+        GtkWidgetLifetime.Remove(_accountRows, widgets.AccountRow);
+        GtkWidgetLifetime.Remove(_pages, widgets.Root);
+        GtkWidgetLifetime.Remove(_nearbyPages, widgets.NearbyPane);
         session.Dispose();
 
         if (_selected == session)

@@ -57,7 +57,7 @@ internal sealed class FriendsPanel : Box
     private void Refresh()
     {
         if (_disposed || !_active) return;
-        foreach (Widget child in _list.Children) _list.Remove(child);
+        GtkWidgetLifetime.Clear(_list);
         if (!_session.IsConnected)
         {
             _list.Add(new Label("Connect to see your friends.") { Xalign = 0, Margin = 8 });

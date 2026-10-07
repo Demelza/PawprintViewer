@@ -721,7 +721,7 @@ internal sealed class InventoryPanel : Box
     private void ShowSearchResults(List<(UUID Id, string Display)> matches, string query, int failedFolders)
     {
         _searching = false;
-        foreach (Widget child in _searchResults.Children) _searchResults.Remove(child);
+        GtkWidgetLifetime.Clear(_searchResults);
         _searchButtons.Clear();
         foreach (var (id, display) in matches)
         {

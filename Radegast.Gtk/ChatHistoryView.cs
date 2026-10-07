@@ -10,13 +10,16 @@ internal sealed class ChatHistoryView : TextView
     private readonly AccountSession _session;
     private readonly bool _followEnd;
     private readonly bool _profileLinks;
-    private readonly List<(string Text, bool NewLine)> _lines = new();
+    private readonly Queue<HistoryLine> _lines = new();
     private readonly Dictionary<ProfileTextLink, TextTag> _links = new();
+    private readonly Dictionary<ProfileTextLink, int> _linkUses = new();
     private readonly Dictionary<UUID, string> _linkNames = new();
     private Cursor? _hand;
     private ProfileTextLink? _pressedLink;
     private int _pressX, _pressY, _revision;
     private bool _stopped, _connected;
+    private int _characters;
+    private long _nextLinkTag;
 
     public event Action<ProfileTextLink>? ProfileLinkActivated;
 
@@ -39,16 +42,43 @@ internal sealed class ChatHistoryView : TextView
     public void AppendLine(string text)
     {
         if (_stopped) return;
-        _lines.Add((text, true));
-        InsertText(text, true);
+        var line = new HistoryLine(ChatMemoryLimits.LimitMessage(text), true);
+        _lines.Enqueue(line);
+        _characters += line.Text.Length;
+        InsertText(line);
+        var removedCharacters = 0;
+        while (_lines.Count > ChatMemoryLimits.Messages || _characters > ChatMemoryLimits.Characters)
+        {
+            var removed = _lines.Dequeue();
+            _characters -= removed.Text.Length;
+            removedCharacters += removed.RenderedCharacters;
+            foreach (var link in removed.Links)
+            {
+                if (--_linkUses[link] != 0) continue;
+                var tag = _links[link];
+                Buffer.TagTable.Remove(tag);
+                tag.Dispose();
+                _links.Remove(link); _linkUses.Remove(link);
+                if (link.AvatarId != UUID.Zero && !_links.Keys.Any(other => other.AvatarId == link.AvatarId))
+                    _linkNames.Remove(link.AvatarId);
+            }
+        }
+        if (removedCharacters == 0) return;
+        _revision++;
+        _pressedLink = null;
+        var start = Buffer.StartIter;
+        var end = Buffer.GetIterAtOffset(removedCharacters);
+        Buffer.Delete(ref start, ref end);
     }
 
     public void SetText(string text)
     {
         if (_stopped) return;
         Clear();
-        _lines.Add((text, false));
-        InsertText(text, false);
+        var line = new HistoryLine(text, false);
+        _lines.Enqueue(line);
+        _characters = text.Length;
+        InsertText(line);
         Buffer.PlaceCursor(Buffer.StartIter);
         ScrollToIter(Buffer.StartIter, 0, false, 0, 0);
     }
@@ -57,6 +87,7 @@ internal sealed class ChatHistoryView : TextView
     {
         if (_stopped) return;
         _lines.Clear();
+        _characters = 0;
         ClearBuffer();
     }
 
@@ -71,12 +102,15 @@ internal sealed class ChatHistoryView : TextView
             tag.Dispose();
         }
         _links.Clear();
+        _linkUses.Clear();
         _linkNames.Clear();
     }
 
-    private void InsertText(string text, bool newLine)
+    private void InsertText(HistoryLine line)
     {
-        foreach (var span in _profileLinks ? _session.FormatProfileText(text) : _session.FormatChatText(text))
+        var firstOffset = Buffer.CharCount;
+        line.Links.Clear();
+        foreach (var span in _profileLinks ? _session.FormatProfileText(line.Text) : _session.FormatChatText(line.Text))
         {
             var offset = Buffer.CharCount;
             var end = Buffer.EndIter;
@@ -89,21 +123,26 @@ internal sealed class ChatHistoryView : TextView
             {
                 if (!_links.TryGetValue(link, out var tag))
                 {
-                    tag = new TextTag(span.Link == null ? "avatar-" + span.AvatarId : "link-" + _links.Count)
+                    tag = new TextTag(span.Link == null ? "avatar-" + span.AvatarId : "link-" + _nextLinkTag++)
                         { Underline = Pango.Underline.Single };
                     tag.ForegroundRgba = StyleContext.GetColor(StateFlags.Link);
                     Buffer.TagTable.Add(tag);
                     _links.Add(link, tag);
                 }
                 Buffer.ApplyTag(tag, start, end);
+                line.Links.Add(link);
                 if (span.AvatarId != UUID.Zero) _linkNames[span.AvatarId] = span.Text;
             }
         }
-        if (!newLine) return;
-        var lastOffset = Buffer.CharCount;
-        var last = Buffer.EndIter;
-        Buffer.Insert(ref last, Environment.NewLine);
-        Buffer.RemoveAllTags(Buffer.GetIterAtOffset(lastOffset), last);
+        foreach (var link in line.Links) _linkUses[link] = _linkUses.GetValueOrDefault(link) + 1;
+        if (line.NewLine)
+        {
+            var lastOffset = Buffer.CharCount;
+            var last = Buffer.EndIter;
+            Buffer.Insert(ref last, Environment.NewLine);
+            Buffer.RemoveAllTags(Buffer.GetIterAtOffset(lastOffset), last);
+        }
+        line.RenderedCharacters = Buffer.CharCount - firstOffset;
     }
 
     private void OnNamesChanged(AccountSession account)
@@ -128,7 +167,7 @@ internal sealed class ChatHistoryView : TextView
         var selected = Buffer.GetSelectionBounds(out var start, out var end);
         var startOffset = start.Offset; var endOffset = end.Offset;
         ClearBuffer();
-        foreach (var (text, newLine) in _lines) InsertText(text, newLine);
+        foreach (var line in _lines) InsertText(line);
         if (selected) Buffer.SelectRange(Buffer.GetIterAtOffset(Math.Min(startOffset, Buffer.CharCount)),
             Buffer.GetIterAtOffset(Math.Min(endOffset, Buffer.CharCount)));
         var revision = _revision;
@@ -194,6 +233,7 @@ internal sealed class ChatHistoryView : TextView
     public void Stop()
     {
         if (_stopped) return;
+        Clear();
         _stopped = true;
         _session.AvatarNamesChanged -= OnNamesChanged;
         _session.FriendsChanged -= OnNamesChanged;
@@ -201,5 +241,13 @@ internal sealed class ChatHistoryView : TextView
         _session.Rlv.Changed -= RefreshText;
         _hand?.Dispose();
         _hand = null;
+    }
+
+    private sealed class HistoryLine(string text, bool newLine)
+    {
+        public string Text { get; } = text;
+        public bool NewLine { get; } = newLine;
+        public int RenderedCharacters;
+        public HashSet<ProfileTextLink> Links { get; } = new();
     }
 }

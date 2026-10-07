@@ -10,6 +10,9 @@ internal sealed class SessionWidgets : IDisposable
     private readonly ChatHistoryView _chatHistory;
     private readonly Entry _chatInput;
     private readonly ListBox _nearbyList;
+    private readonly Dictionary<LibreMetaverse.UUID, NearbyRow> _nearbyRows = new();
+    private ListBoxRow? _nearbyEmptyRow;
+    private Label? _nearbyEmptyLabel;
     private readonly InventoryPanel _inventoryPanel;
     private readonly AttachmentsPanel _attachmentsPanel;
     private readonly FriendsPanel _friendsPanel;
@@ -67,6 +70,7 @@ internal sealed class SessionWidgets : IDisposable
         var nearbyScroll = new ScrolledWindow();
         nearbyScroll.SetPolicy(PolicyType.Never, PolicyType.Automatic);
         _nearbyList = new ListBox { SelectionMode = SelectionMode.None };
+        _nearbyList.SortFunc = (a, b) => a is NearbyRow first && b is NearbyRow second ? first.Order.CompareTo(second.Order) : 0;
         nearbyScroll.Add(_nearbyList);
         NearbyPane.PackStart(nearbyScroll, true, true, 0);
 
@@ -183,33 +187,60 @@ internal sealed class SessionWidgets : IDisposable
 
     public void RefreshNearby()
     {
-        foreach (Widget child in _nearbyList.Children)
-            _nearbyList.Remove(child);
-
-        if (_session.Rlv.Enabled && !_session.Rlv.Service.Permissions.CanShowNearby())
-            _nearbyList.Add(new Label("Nearby avatars hidden by RLV")
-                { Xalign = 0, Margin = 8, Ellipsize = Pango.EllipsizeMode.End });
-        else if (_session.Nearby.Count == 0)
+        if (_disposed) return;
+        var hidden = _session.Rlv.Enabled && !_session.Rlv.Service.Permissions.CanShowNearby();
+        var people = hidden ? Array.Empty<NearbyResident>() : _session.Nearby;
+        var ids = people.Select(person => person.Id).ToHashSet();
+        foreach (var id in _nearbyRows.Keys.Where(id => !ids.Contains(id)).ToArray())
         {
-            var empty = new Label("No nearby avatars") { Xalign = 0, Margin = 8 };
-            _nearbyList.Add(empty);
+            GtkWidgetLifetime.Remove(_nearbyList, _nearbyRows[id]);
+            _nearbyRows.Remove(id);
+        }
+        if (people.Count == 0)
+        {
+            if (_nearbyEmptyRow == null)
+            {
+                _nearbyEmptyLabel = new Label { Xalign = 0, Margin = 8, Ellipsize = Pango.EllipsizeMode.End };
+                _nearbyEmptyRow = new ListBoxRow();
+                _nearbyEmptyRow.Add(_nearbyEmptyLabel);
+                _nearbyList.Add(_nearbyEmptyRow);
+            }
+            _nearbyEmptyLabel!.Text = hidden ? "Nearby avatars hidden by RLV" : "No nearby avatars";
         }
         else
         {
-            foreach (var person in _session.Nearby)
+            if (_nearbyEmptyRow != null)
             {
-                var showName = !_session.Rlv.Enabled || _session.Rlv.Service.Permissions.CanShowNames(person.Id.Guid);
-                var label = new Label($"{(showName ? person.Name : "Resident")}  ·  {person.Distance} m")
-                {
-                    Xalign = 0,
-                    Margin = 6,
-                    Ellipsize = Pango.EllipsizeMode.End,
-                    TooltipText = showName ? $"{person.Name} · {person.Distance} m\n{person.Id}" : null
-                };
-                _nearbyList.Add(label);
+                GtkWidgetLifetime.Remove(_nearbyList, _nearbyEmptyRow);
+                _nearbyEmptyRow = null; _nearbyEmptyLabel = null;
             }
+            var order = 0;
+            foreach (var person in people)
+            {
+                if (!_nearbyRows.TryGetValue(person.Id, out var row))
+                {
+                    row = new NearbyRow();
+                    _nearbyRows.Add(person.Id, row);
+                    _nearbyList.Add(row);
+                }
+                row.Update(person, order++, !_session.Rlv.Enabled || _session.Rlv.Service.Permissions.CanShowNames(person.Id.Guid));
+            }
+            _nearbyList.InvalidateSort();
         }
         _nearbyList.ShowAll();
+    }
+
+    private sealed class NearbyRow : ListBoxRow
+    {
+        private readonly Label _name = new() { Xalign = 0, Margin = 6, Ellipsize = Pango.EllipsizeMode.End };
+        public int Order { get; private set; }
+        public NearbyRow() => Add(_name);
+        public void Update(NearbyResident person, int order, bool showName)
+        {
+            Order = order;
+            _name.Text = $"{(showName ? person.Name : "Resident")}  ·  {person.Distance} m";
+            _name.TooltipText = showName ? $"{person.Name} · {person.Distance} m\n{person.Id}" : null;
+        }
     }
 
     public void UpdateAccountLabel(bool selected)

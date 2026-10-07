@@ -24,7 +24,7 @@ internal class ChatConversationsPanel : Box
     private ChatConversation? _selected;
     private ChatConversation? _rendered;
     private string _renderedName = string.Empty;
-    private int _renderedCount;
+    private long _renderedIndex;
     private bool _restoringDraft;
     private bool _displayed;
     private bool _disposed;
@@ -163,7 +163,7 @@ internal class ChatConversationsPanel : Box
         var ids = conversations.Select(chat => chat.Id).ToHashSet();
         foreach (var id in _buttons.Keys.Where(id => !ids.Contains(id)).ToArray())
         {
-            _conversationRows.Remove(_buttons[id]);
+            GtkWidgetLifetime.Remove(_conversationRows, _buttons[id]);
             _buttons.Remove(id);
         }
         if (_selected != null && !ids.Contains(_selected.Id))
@@ -208,13 +208,15 @@ internal class ChatConversationsPanel : Box
         var previousScroll = adjustment.Value;
         var switched = _rendered != _selected;
         var atBottom = adjustment.Value + adjustment.PageSize >= adjustment.Upper - 24;
-        var rebuild = switched || force || name != _renderedName;
-        if (rebuild) { _history.Clear(); _renderedCount = 0; }
-        var appended = _selected.Messages.Count > _renderedCount;
+        var first = _selected.FirstMessageIndex;
+        var end = first + _selected.Messages.Count;
+        var rebuild = switched || force || name != _renderedName || _renderedIndex < first;
+        if (rebuild) { _history.Clear(); _renderedIndex = first; }
+        var appended = end > _renderedIndex;
         var outgoing = !rebuild && appended && _selected.Messages[^1].Outgoing;
-        for (; _renderedCount < _selected.Messages.Count; _renderedCount++)
+        for (; _renderedIndex < end; _renderedIndex++)
         {
-            var message = _selected.Messages[_renderedCount];
+            var message = _selected.Messages[(int)(_renderedIndex - first)];
             var from = _groupChats ? _session.DisplayGroupSender(message) : message.Outgoing ? _session.Name : name;
             var time = message.Timestamp.Date == DateTime.Today ? message.Timestamp.ToString("HH:mm") : message.Timestamp.ToString("yyyy-MM-dd HH:mm");
             var text = message.Text.StartsWith("/me ", StringComparison.OrdinalIgnoreCase)

@@ -16,10 +16,12 @@ if (args.Contains("--chat-links-smoke", StringComparer.Ordinal)) return NativeCh
 if (args.Contains("--profile-text-smoke", StringComparer.Ordinal)) return NativeProfileTextChecks.Run();
 if (args.Contains("--profile-links-smoke", StringComparer.Ordinal)) return NativeProfileLinkChecks.Run();
 if (args.Contains("--account-settings-smoke", StringComparer.Ordinal)) return NativeAccountSettingsChecks.Run();
+if (args.Contains("--memory-smoke", StringComparer.Ordinal)) return NativeMemoryChecks.Run();
 
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("IM and group chat histories retain recent messages within count/text budgets, preserving drafts and Unicode", ChatMemoryChecks.Retention),
     ("Sim restart reminders notify once per minute with live remaining time and no duplicate or stale popups", RegionRestartNotificationChecks.TimingAndUpdates),
     ("Changing regions, disconnecting, cancelling or disposing stops queued sim restart reminders", RegionRestartNotificationChecks.Cancellation),
     ("Structured restart alerts notify independently of restart teleports, obey global switches and stay account-specific", RegionRestartNotificationChecks.PacketsAndPreferences),

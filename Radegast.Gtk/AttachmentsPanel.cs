@@ -113,7 +113,7 @@ internal sealed class AttachmentsPanel : Box
             _requestedProperties.Clear();
         }
 
-        foreach (Widget child in _list.Children) _list.Remove(child);
+        GtkWidgetLifetime.Clear(_list);
         if (!_session.IsConnected || sim == null)
         {
             _list.Add(new Label("Connect to see equipped objects.") { Xalign = 0, Margin = 8 });

@@ -106,8 +106,7 @@ internal sealed class ObjectsPanel : Box
         foreach (var id in _rows.Keys.Where(id => !ids.Contains(id)).ToArray())
         {
             var row = _rows[id];
-            _list.Remove(row);
-            row.Dispose();
+            GtkWidgetLifetime.Remove(_list, row);
             _rows.Remove(id);
             _nameRequests.Remove(id);
         }
