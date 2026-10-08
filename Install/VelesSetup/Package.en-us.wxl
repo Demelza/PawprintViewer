@@ -1,7 +1,0 @@
-<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="en-US">
-  <?include ..\VelesBuildProperties.wxi?>
-
-  <String Id="DowngradeError" Value="A newer version of [ProductName] is already installed." />
-  <String Id="MissingDotNet10" Value="$(var.productName) requires the .NET 10 Desktop Runtime. Please install it from https://dotnet.microsoft.com/download/dotnet/10.0 and run this installer again." />
-
-</WixLocalization>

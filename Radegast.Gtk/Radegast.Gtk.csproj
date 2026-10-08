@@ -12,8 +12,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Radegast.Gtk.Tests" />
     <PackageReference Include="GtkSharp" Version="3.24.24.95" />
-    <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" SetTargetFramework="TargetFramework=net10.0" />
-    <Content Include="..\Radegast\grids.xml" Link="grids.xml" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" />
+    <Content Include="grids.xml" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="PawprintViewer.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

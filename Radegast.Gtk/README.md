@@ -7,6 +7,22 @@ accounts or logging out.
 It references `Radegast.Core` for grid communication and does not start the
 3D renderer or the FMOD audio engine.
 
+## Build
+
+The repository contains the GTK3 viewer, its shared core and their tests. From
+its root, build the solution with:
+
+```sh
+dotnet build -c Release
+```
+
+The executable is `Radegast.Gtk/bin/Release/net10.0/PawprintViewer`. To collect
+all runtime files in a separate directory:
+
+```sh
+dotnet publish Radegast.Gtk/Radegast.Gtk.csproj -c Release -o bin/PawprintViewer
+```
+
 ## Run
 
 Install the .NET 10 SDK and the GTK3 runtime, then run from the repository root:
@@ -16,7 +32,7 @@ dotnet run --project Radegast.Gtk/Radegast.Gtk.csproj
 ```
 
 The add-account window supports Second Life and the grids listed in the
-repository's `grids.xml`, plus a custom login URI. An MFA challenge can be
+`Radegast.Gtk/grids.xml`, plus a custom login URI. An MFA challenge can be
 answered in the same window. The account field is an editable dropdown: select
 a remembered account to fill its password, or type a new name manually.
 Successful logins remember names and update saved passwords automatically.
@@ -324,7 +340,7 @@ relay is not included.
 The adapter's regression checks run without a display or grid login:
 
 ```sh
-dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0
+dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj
 ```
 
 The map's native GTK scroll check requires a desktop display, but no login. It
@@ -332,7 +348,7 @@ checks smooth scrolling, regular mouse-wheel events, click/drag separation, and
 avatar-marker drawing through GTK callbacks:
 
 ```sh
-G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --map-scroll-smoke
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --map-scroll-smoke
 ```
 
 The login window's native GTK check also requires a display. It simulates
@@ -341,7 +357,7 @@ closure, and forces garbage collection to catch native reference errors.
 It uses temporary account metadata and a fake keyring; no grid login is needed:
 
 ```sh
-G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --login-smoke
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --login-smoke
 ```
 
 The Account Settings check simulates disconnects and advances a fake clock to
@@ -349,7 +365,7 @@ test the reconnect and restart destination/delay controls, preference saving,
 reconnect status, inventory cache replacement and logout cleanup without a grid login:
 
 ```sh
-G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --account-settings-smoke
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --account-settings-smoke
 ```
 
 The native memory check simulates repeated nearby updates, row departures,
@@ -359,7 +375,7 @@ that group chat continues displaying new messages after history reaches its
 limit. It requires a display and does not log in to a grid:
 
 ```sh
-G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --memory-smoke
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --memory-smoke
 ```
 
 The native chat-link check tests name resolution and labeled web/pay/about links
@@ -369,7 +385,7 @@ captures browser requests without opening a browser, uses simulated packets
 and does not connect to a grid:
 
 ```sh
-G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --chat-links-smoke
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --chat-links-smoke
 ```
 
 The full-profile check uses simulated HTTP replies to test long Second Life and
@@ -377,7 +393,7 @@ First Life text, capability/legacy reply order, fallback failures, the larger
 text area and scrolling through the final paragraphs:
 
 ```sh
-G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --profile-text-smoke
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --profile-text-smoke
 ```
 
 The labeled-profile-link check clicks web, payment and avatar links in both
@@ -385,7 +401,7 @@ profile tabs, checks payment recipients, selection and window cleanup, and
 captures browser requests without launching a browser or paying anyone:
 
 ```sh
-G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --profile-links-smoke
+G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --profile-links-smoke
 ```
 
 For a live check, use an RLV attachment to test detection, lock/unlock and

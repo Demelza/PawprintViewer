@@ -1,7 +1,4 @@
-# Veles Documentation
+# Pawprint Viewer documentation
 
-- [Veles User Guide](VelesUserGuide.md) — installing, updating, and getting
-  around Radegast Veles.
-- [Plugin Catalog](PluginCatalog.md) — what the bundled plugins do.
-- [Plugin Creator's Guide](PluginCreatorsGuide.md) — how to write your own
-  Veles plugin.
+- [Viewer README](../Radegast.Gtk/README.md): features, setup, build and test instructions.
+- [GTK3 client plan](Gtk3ClientPlan.md): architecture, implemented features and development checkpoints.

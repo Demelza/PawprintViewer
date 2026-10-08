@@ -1,85 +1,48 @@
-name: Build and Test
+name: Build and Test Pawprint Viewer
 
 on:
   push:
-    branches: [ master, localbuilding ]
   pull_request:
-    branches: [ master ]
 
 jobs:
-  build:
-    name: Build (${{ matrix.configuration }}, ${{ matrix.platform }})
-    runs-on: windows-2022
-    strategy:
-      matrix:
-        platform: [ x64, x86, ARM64 ]
-        configuration: [ LegacyRadegast, RadegastWindows ]
-
+  linux:
+    name: GTK3 viewer and shared core
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          fetch-depth: 0
-          persist-credentials: true
 
-      - name: Setup DotNet
+      - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
-      - name: Install WiX Toolset
-        shell: pwsh
+      - name: Install GTK3 runtime dependencies
         run: |
-          dotnet tool install --global wix --version 7.0.0
-          wix --version
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0t64 libsecret-1-0 libnotify4
 
-      - name: Set TAG_VERSION
-        shell: pwsh
-        run: |
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $tag = '${{ github.ref_name }}'
-            $tagVersion = $tag -replace 'v',''
-            $tagVersion = "$tagVersion.${{ github.run_number }}"
-          } else {
-            $tagVersion = "v3.0.${{ github.run_number }}"
-            $tagVersion = $tagVersion -replace 'v',''
-          }
-          Write-Host "Setting TAG_VERSION to $tagVersion"
-          echo "TAG_VERSION=$tagVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Restore
+        run: dotnet restore PawprintViewer.sln
 
-      - name: Restore for platform-specific build
-        run: dotnet restore radegast.sln -p:Configuration=${{ matrix.configuration }} -p:Platform=${{ matrix.platform }}
+      - name: Build
+        run: dotnet build PawprintViewer.sln -c Release --no-restore
 
-      - name: Build solution
-        run: dotnet build radegast.sln -c ${{ matrix.configuration }} -p:Platform=${{ matrix.platform }} --no-restore
+      - name: Run shared core tests
+        run: dotnet test Radegast.Core.Tests/Radegast.Core.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-results.trx"
 
-      - name: Upload build artifacts
+      - name: Run account integration checks
+        run: dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -c Release --no-build
+
+      - name: Collect viewer files
+        run: dotnet publish Radegast.Gtk/Radegast.Gtk.csproj -c Release --no-build --no-restore -o bin/PawprintViewer
+
+      - name: Upload viewer files
         uses: actions/upload-artifact@v4
         with:
-          name: Radegast-${{ matrix.configuration }}-${{ matrix.platform }}-${{ env.TAG_VERSION }}
-          path: |
-            bin\Radegast\Release\**
-            bin\Veles\Release\**
-          if-no-files-found: warn
-
-  test:
-    name: Test (Radegast.Core)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          fetch-depth: 0
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Run tests
-        run: dotnet test Radegast.Core.Tests/Radegast.Core.Tests.csproj --framework net10.0
+          name: PawprintViewer-Linux
+          path: bin/PawprintViewer/
+          if-no-files-found: error
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -87,28 +50,3 @@ jobs:
         with:
           name: test-results
           path: Radegast.Core.Tests/TestResults/test-results.trx
-
-  test-windows:
-    name: Test net481 (Windows)
-    runs-on: windows-2022
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          fetch-depth: 0
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Run tests (net48)
-        run: dotnet test Radegast.Core.Tests/Radegast.Core.Tests.csproj --framework net481 --configuration Release --logger "trx;LogFileName=test-results-net481.trx" --verbosity normal
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results-net481
-          path: Radegast.Core.Tests\TestResults\test-results-net481.trx

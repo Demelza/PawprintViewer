@@ -2,8 +2,18 @@
 
 This document records the agreed direction for a Linux client with native GTK3
 widgets. It uses `Radegast.Core` for grid communication and account services.
-The GTK client is a separate front end; it does not load the WinForms or
-Avalonia user interfaces.
+The GTK client is the only front end in this repository. The viewer and shared
+core target .NET 10; the WinForms and Avalonia projects have been removed.
+
+## Repository cleanup checkpoint
+
+`PawprintViewer.sln` contains the GTK viewer, shared core, account integration
+checks and core unit tests. The GTK project owns `grids.xml` and copies it beside
+the executable for both builds and publishing. The upstream viewer projects,
+plugins, Windows installers, Veles Flatpak files, publishing workflows and
+bundled FMOD/speech native libraries are removed. Copyright notices and the
+license remain. The remaining Linux CI builds, tests and collects Pawprint
+Viewer; `dotnet build -c Release` works from the repository root.
 
 ## Window
 
@@ -65,8 +75,7 @@ account and connection state.
    GtkSharp. Keep GTK dependencies out of `Radegast.Core`.
 2. Give each logged-in account its own `GridClient`, network adapter, and
    session state. Marshal network events to the GTK main loop before updating
-   widgets. The current Avalonia `AgentSessionManager` demonstrates the
-   multi-session lifetime, but cannot be referenced directly by the GTK app.
+   widgets.
 3. Put the selected session in the single main window, while session models
    retain the state needed to restore their tabs and conversations.
 4. Implement login and nearby chat first, then concurrent logins and the

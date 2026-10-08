@@ -1,22 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net481;net10.0</TargetFrameworks>
+    <TargetFramework>net10.0</TargetFramework>
     <AssemblyTitle>Radegast.Core</AssemblyTitle>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Platforms>AnyCPU;x64;x86;ARM64</Platforms>
-    <OutputPath>..\bin\$(Configuration)\</OutputPath>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
-    <DebugType>full</DebugType>
-    <DefineConstants>TRACE;DEBUG</DefineConstants>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
-    <DebugType>pdbonly</DebugType>
-    <DefineConstants>TRACE</DefineConstants>
-  </PropertyGroup>
-    <ItemGroup>
+  <ItemGroup>
     <PackageReference Include="LibreMetaverse" Version="3.1.5" />
     <PackageReference Include="LibreMetaverse.Imaging.Skia" Version="3.1.5" />
     <PackageReference Include="LibreMetaverse.LslTools" Version="3.1.5" />
@@ -37,19 +27,4 @@
     <PackageReference Include="System.ComponentModel.Composition" Version="10.0.10" />
     <PackageReference Include="System.Threading.RateLimiting" Version="10.0.11" />
   </ItemGroup>
-  <!-- Bakes every PackageReference's id+version into this assembly's metadata attributes so
-       RadegastVeles' About dialog (AboutWindow.axaml.cs, PopulateLibraries) can credit them at
-       runtime, in addition to its own direct PackageReferences, without going stale.
-       Metadata-batching (%(...)) only expands inside a Target, so this has to run as a
-       Target rather than a bare ItemGroup. -->
-  <Target Name="EmbedPackageReferenceMetadata" BeforeTargets="GetAssemblyAttributes">
-    <ItemGroup>
-      <AssemblyMetadata Include="PackageRef_%(PackageReference.Identity)" Value="%(PackageReference.Version)" />
-    </ItemGroup>
-  </Target>
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition=" '$(OS)' == 'Windows_NT' ">
-    <Exec Command="xcopy /y &quot;$(ProjectDir)assemblies\x64&quot; &quot;$(OutDir)dll\x64&quot; /E/I" />
-    <Exec Command="xcopy /y &quot;$(ProjectDir)assemblies\x86&quot; &quot;$(OutDir)dll\x86&quot; /E/I" />
-    <Exec Command="xcopy /y &quot;$(ProjectDir)assemblies\arm64&quot; &quot;$(OutDir)dll\arm64&quot; /E/I" />
-  </Target>
 </Project>

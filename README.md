@@ -1,65 +1,85 @@
+# Pawprint Viewer
+
+A lightweight Second Life and OpenSimulator viewer for Linux with a native GTK3
+interface. Multiple accounts share one window, with chat, inventory, attachments,
+friends, nearby objects, a world map, RLV/RLVa and desktop notifications. GTK uses
+the system theme and font. The viewer has no 3D view or in-world audio.
+
+## Requirements
+
+- .NET 10 SDK to build; .NET 10 runtime to run a framework-dependent build.
+- GTK3 runtime on Linux.
+- `libsecret` and a desktop Secret Service provider for saved passwords.
+- `libnotify` and a desktop notification service for notification popups.
+
+## Build and run
+
+Run these commands from the repository root:
+
+```sh
+dotnet build -c Release
+./Radegast.Gtk/bin/Release/net10.0/PawprintViewer
 ```
-██████╗  █████╗ ██████╗ ███████╗ ██████╗  █████╗ ███████╗████████╗    
-██╔══██╗██╔══██╗██╔══██╗██╔════╝██╔════╝ ██╔══██╗██╔════╝╚══██╔══╝    
-██████╔╝███████║██║  ██║█████╗  ██║  ███╗███████║███████╗   ██║       
-██╔══██╗██╔══██║██║  ██║██╔══╝  ██║   ██║██╔══██║╚════██║   ██║       
-██║  ██║██║  ██║██████╔╝███████╗╚██████╔╝██║  ██║███████║   ██║       
-╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝   ╚═╝     
+
+For development:
+
+```sh
+dotnet run --project Radegast.Gtk/Radegast.Gtk.csproj
 ```
-Radegast Metaverse Client (http://radegast.life/)
 
-[![License: LGPL v3](https://img.shields.io/badge/License-LGPL%20v3-blue.svg)](https://github.com/cinderblocks/radegast/blob/master/LICENSE.txt)
-[![Latest version downloads](https://img.shields.io/github/downloads-pre/cinderblocks/radegast/latest/total)](https://radegast.life/downloads/)  
-[![Tests](https://github.com/cinderblocks/radegast/actions/workflows/test.yml/badge.svg)](https://github.com/cinderblocks/radegast/actions/workflows/test.yml)  
-[![Commits per month](https://img.shields.io/github/commit-activity/m/cinderblocks/radegast)](https://www.github.com/cinderblocks/radegast/)  
-[![ZEC](https://img.shields.io/keybase/zec/cinder)](https://keybase.io/cinder) [![BTC](https://img.shields.io/keybase/btc/cinder)](https://keybase.io/cinder) 
+To collect the viewer and its dependencies in one directory:
 
-## Getting started
+```sh
+dotnet publish Radegast.Gtk/Radegast.Gtk.csproj -c Release -o bin/PawprintViewer
+./bin/PawprintViewer/PawprintViewer
+```
 
-Radegast is a virtual world client compatible with Second Life and OpenSimulator.
-Its main purpose is to provide an alternative client to Linden Lab derived virtual world viewers.
-There is a strong focus on accessability and non-3D interaction.
+These builds use the installed .NET runtime and system GTK3 libraries.
 
-This repository builds three clients:
+## Repository layout
 
-* **Radegast** (aka "Legacy") - the original WinForms client, Windows-only.
-* **RadegastVeles** (aka "Veles") - a cross-platform Avalonia-based rewrite, for Windows, macOS, and Linux.
-* **Radegast.Gtk** - an experimental GTK3 client for Linux, focused on multiple accounts and text interaction.
+| Path | Purpose |
+| --- | --- |
+| `PawprintViewer.sln` | GTK viewer, shared core and their tests |
+| `Radegast.Gtk/` | Pawprint Viewer interface, icon and grid list |
+| `Radegast.Core/` | Shared grid communication and supporting code |
+| `Radegast.Gtk.Tests/` | GTK account integration checks and native UI checks |
+| `Radegast.Core.Tests/` | Shared core unit tests |
+| `docs/` | GTK development plan |
 
-### Prerequisites
+The source namespaces and project directory names retain `Radegast` to match the
+shared upstream code. This fork builds the GTK3 viewer only.
 
-Radegast (Legacy) requires .NET Framework 4.8 or compatible Mono version to build and run.
+## Tests
 
-RadegastVeles (Veles) requires the .NET 10 runtime and builds/runs on Windows, macOS, and Linux.
+```sh
+dotnet test Radegast.Core.Tests/Radegast.Core.Tests.csproj
+dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj
+```
 
-Radegast.Gtk requires .NET 10 and the GTK3 runtime on Linux. Build and run it with
-`dotnet run --project Radegast.Gtk/Radegast.Gtk.csproj`. Its current features and
-limitations are listed in [Radegast.Gtk/README.md](Radegast.Gtk/README.md).
+The account integration checks use simulated packets and do not log in to a grid.
+Display-dependent checks and further setup instructions are documented in the
+[GTK viewer README](Radegast.Gtk/README.md).
 
-### macOS notes
+## Documentation
 
-The macOS build of Veles is ad-hoc signed (no Apple Developer ID certificate, no notarization),
-since a signing certificate isn't currently available for this project. macOS will still show a
-"cannot verify the developer" / "unidentified developer" warning on first launch. To run the app:
-right-click (or Control-click) the app in Finder and choose **Open**, then confirm in the dialog
-that appears. You only need to do this once per download.
+- [Viewer features, setup and testing](Radegast.Gtk/README.md)
+- [GTK3 client development plan](docs/Gtk3ClientPlan.md)
 
-### Documentation
+## Origin
 
-See [docs/](docs/README.md) for the Veles user guide, plugin catalog, and
-plugin developer guide.
+Pawprint Viewer is derived from the Radegast Metaverse Client. The original
+project's authors, license and acknowledgments are retained below. The WinForms
+and Avalonia clients, their plugins and their installers are not included in
+this GTK3 fork.
 
-### Contributing
-
-Pull requests are nice. Try not to be a dick, and we will all get along just fine.
-
-## Authors
+## Upstream authors
 
 ### Project founder:
 
 * **Latif Khalifa**
 
-### Current maintainer and lead developer:
+### Upstream maintainer and lead developer:
 
 * **Cinder Roxley** (email cinder sdf.org)
 
