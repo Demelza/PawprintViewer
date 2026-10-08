@@ -97,7 +97,7 @@ internal static class NativeAccountSettingsChecks
                             h.Account.Settings.RestartDestinationX == 45.5f && h.Account.Settings.RestartDestinationY == 67 &&
                             h.Account.Settings.RestartDestinationZ == 901 && h.Account.Settings.ReturnDelayMinutes == 12 &&
                             h.Store.Load(new SavedLogin(h.Name, h.Grid.LoginURI), out _) == h.Account.Settings &&
-                            Field<Label>(panel, "_restartStatus").Text.StartsWith("Waiting"),
+                            h.Account.RestartTeleportStatus.StartsWith("Waiting"),
                             "Restart controls did not apply/persist their settings or update their status");
                         restart.Active = false;
                         Check(!restartRegion.Sensitive && !h.Account.Settings.TeleportOnRegionRestart,
