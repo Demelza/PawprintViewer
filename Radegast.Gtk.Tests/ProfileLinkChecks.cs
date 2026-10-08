@@ -52,32 +52,35 @@ internal static class ProfileLinkChecks
         try
         {
             fixture.Friend("Momoi Pawprint", id: Payee);
-            var text = Example + $"\n[{ChatLinkChecks.Url(Payee)} My partner ♥] {ChatLinkChecks.Url(Payee)}";
-            var formatted = account.FormatProfileText(text);
-            Check(Render(formatted) == Expected + "\nMy partner ♥ Momoi Pawprint" &&
-                formatted.Count(span => span.Link != null) == 5, "Formatting replaced a supplied label with a resident name");
-            Check(Render(account.FormatChatText(Example)) == Example, "Profile markup changed ordinary chat or outgoing text");
-            Check(!packets().OfType<MoneyTransferRequestPacket>().Any(), "Displaying a payment link sent money");
-            await fixture.Command("@showloc=n");
-            var hiddenLocation = account.FormatProfileText(text);
-            Check(Render(hiddenLocation).Contains("[location hidden]") &&
-                hiddenLocation.Where(span => span.Link != null).All(span => !span.Link!.IsLocation) &&
-                !account.CanUseProfileLink(formatted.Single(span => span.Text == "Mainstore").Link!),
-                "A labeled map URL bypassed location hiding or stale-link permissions");
-            await fixture.Command("@shownames=n");
-            var hiddenNames = account.FormatProfileText(text);
-            Check(!Render(hiddenNames).Contains("Momoi") && !Render(hiddenNames).Contains("My partner") &&
-                !Render(hiddenNames).Contains("Spoil") && hiddenNames.Where(span => span.Link != null)
-                    .All(span => span.Link!.AvatarId == UUID.Zero) && hiddenNames.All(span => span.AvatarId == UUID.Zero) &&
-                !account.CanUseProfileLink(formatted.Single(span => span.Text == "Spoil me ♥").Link!),
-                "Avatar labels or stale payment links bypassed name hiding");
-            await fixture.Command("@showloc=y,shownames=y");
-            Check(Render(account.FormatProfileText(text)) == Expected + "\nMy partner ♥ Momoi Pawprint",
-                "Unlocking did not restore the original labels");
-            Connected(account, false);
-            var offline = account.FormatProfileText(Example);
-            Check(Render(offline) == Expected && offline.Single(span => span.Text == "Spoil me ♥").Link == null &&
-                offline.Single(span => span.Text == "Wishlist~").Link != null, "Disconnected payment links remained active or web links disappeared");
+            foreach (var format in new Func<string, IReadOnlyList<ChatTextSpan>>[] { account.FormatProfileText, account.FormatChatText })
+            {
+                Connected(account, true);
+                var text = Example + $"\n[{ChatLinkChecks.Url(Payee)} My partner ♥] {ChatLinkChecks.Url(Payee)}";
+                var formatted = format(text);
+                Check(Render(formatted) == Expected + "\nMy partner ♥ Momoi Pawprint" &&
+                    formatted.Count(span => span.Link != null) == 5, "Formatting replaced a supplied label with a resident name");
+                Check(!packets().OfType<MoneyTransferRequestPacket>().Any(), "Displaying a payment link sent money");
+                await fixture.Command("@showloc=n");
+                var hiddenLocation = format(text);
+                Check(Render(hiddenLocation).Contains("[location hidden]") &&
+                    hiddenLocation.Where(span => span.Link != null).All(span => !span.Link!.IsLocation) &&
+                    !account.CanUseProfileLink(formatted.Single(span => span.Text == "Mainstore").Link!),
+                    "A labeled map URL bypassed location hiding or stale-link permissions");
+                await fixture.Command("@shownames=n");
+                var hiddenNames = format(text);
+                Check(!Render(hiddenNames).Contains("Momoi") && !Render(hiddenNames).Contains("My partner") &&
+                    !Render(hiddenNames).Contains("Spoil") && hiddenNames.Where(span => span.Link != null)
+                        .All(span => span.Link!.AvatarId == UUID.Zero) && hiddenNames.All(span => span.AvatarId == UUID.Zero) &&
+                    !account.CanUseProfileLink(formatted.Single(span => span.Text == "Spoil me ♥").Link!),
+                    "Avatar labels or stale payment links bypassed name hiding");
+                await fixture.Command("@showloc=y,shownames=y");
+                Check(Render(format(text)) == Expected + "\nMy partner ♥ Momoi Pawprint",
+                    "Unlocking did not restore the original labels");
+                Connected(account, false);
+                var offline = format(Example);
+                Check(Render(offline) == Expected && offline.Single(span => span.Text == "Spoil me ♥").Link == null &&
+                    offline.Single(span => span.Text == "Wishlist~").Link != null, "Disconnected payment links remained active or web links disappeared");
+            }
         }
         finally { Connected(account, false); }
     }

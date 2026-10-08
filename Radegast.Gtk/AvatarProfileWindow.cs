@@ -1,6 +1,5 @@
 using Gtk;
 using LibreMetaverse;
-using System.Diagnostics;
 
 namespace Radegast.Gtk;
 
@@ -31,7 +30,7 @@ internal sealed class AvatarProfileWindow : Window
         _session = session;
         _avatar = avatar;
         _parent = parent;
-        _openWebLink = openWebLink ?? OpenBrowser;
+        _openWebLink = openWebLink ?? ExternalLinks.Open;
         _about = new ChatHistoryView(session, followEnd: false, profileLinks: true);
         _firstLife = new ChatHistoryView(session, followEnd: false, profileLinks: true);
         _about.ProfileLinkActivated += OnProfileLink;
@@ -143,11 +142,6 @@ internal sealed class AvatarProfileWindow : Window
         try { action(); }
         catch (Exception ex) { _status.Text = _session.RedactText(ex.Message); }
         RefreshPresentation();
-    }
-
-    private static void OpenBrowser(string url)
-    {
-        using var process = Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
 
     private void OnProfileLink(ProfileTextLink link) => RunAction(() =>

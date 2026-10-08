@@ -99,6 +99,57 @@ internal static class ChatLinkChecks
     }
 
     internal static string Url(UUID id) => $"secondlife:///app/agent/{id}/about";
+
+    public static async Task LabeledLinks()
+    {
+        using var account = new AccountSession(action => action());
+        using var other = new AccountSession(action => action());
+        using var fixture = new Fixture(account);
+        using var otherFixture = new Fixture(other);
+        var packets = fixture.CapturePackets();
+        Connected(account, true); Connected(other, true);
+        try
+        {
+            var peer = fixture.Friend("Momoi Pawprint", id: ProfileLinkChecks.Payee).UUID;
+            var text = $"[{ProfileLinkChecks.Wishlist} Wishlist ♥] [{Url(peer)} My partner] " +
+                $"[secondlife:///app/agent/{peer}/pay Spoil me]";
+            Check(Render(account, text) == "Wishlist ♥ My partner Spoil me", "Chat labels retained brackets or raw URLs");
+            var links = account.FormatChatText(text).Where(span => span.Link != null).Select(span => span.Link!).ToArray();
+            var opened = new List<(AccountSession Account, ProfileTextLink Link)>();
+            var profiles = new List<(AccountSession Account, UUID Id)>();
+            account.ChatLinkRequested += (source, link) => opened.Add((source, link));
+            other.ChatLinkRequested += (source, link) => opened.Add((source, link));
+            account.AvatarProfileRequested += (source, id) => profiles.Add((source, id));
+            foreach (var link in links) account.OpenChatLink(link);
+            other.OpenChatLink(links[0]);
+            Check(opened.SequenceEqual(new[] { (account, links[0]), (account, links[2]), (other, links[0]) }) &&
+                profiles.SequenceEqual(new[] { (account, peer) }) && !packets().OfType<MoneyTransferRequestPacket>().Any(),
+                "A labeled link used another account, wrong action or paid without confirmation");
+            account.SendNearbyChat(text);
+            account.SendInstantMessage(peer, text);
+            var group = UUID.Random();
+            fixture.Groups((group, "Test Group"));
+            fixture.GroupJoin(group, true);
+            account.SendGroupMessage(group, text);
+            var sent = packets();
+            Check(Utils.BytesToString(sent.OfType<ChatFromViewerPacket>().Single().ChatData.Message) == text &&
+                sent.OfType<ImprovedInstantMessagePacket>().Where(packet => packet.MessageBlock.Dialog is
+                    (byte)InstantMessageDialog.MessageFromAgent or (byte)InstantMessageDialog.SessionSend)
+                    .Select(packet => Utils.BytesToString(packet.MessageBlock.Message)).SequenceEqual(new[] { text, text }) &&
+                account.Conversations.Single().Messages.Single().Text == text &&
+                account.GroupConversations.Single().Messages.Single().Text == text,
+                "Display formatting changed an outgoing chat, IM, group packet or stored message");
+            await fixture.Command("@shownames=n,showloc=n");
+            account.OpenChatLink(links[1]); account.OpenChatLink(links[2]);
+            account.OpenChatLink(new ProfileTextLink(ProfileLinkChecks.Location, ProfileLinkAction.Web));
+            Check(opened.Count == 3 && profiles.Count == 1, "A stale chat label bypassed RLV permissions");
+            await fixture.Command("@shownames=y,showloc=y");
+            Connected(account, false);
+            account.OpenChatLink(links[2]);
+            Check(opened.Count == 3, "A disconnected account opened a payment link");
+        }
+        finally { Connected(account, false); Connected(other, false); }
+    }
     private static string Render(AccountSession account, string text) => string.Concat(account.FormatChatText(text).Select(span => span.Text));
     private static void Connected(AccountSession account, bool value) =>
         typeof(Radegast.NetCom).GetProperty(nameof(Radegast.NetCom.IsLoggedIn))!.SetValue(account.Net, value);

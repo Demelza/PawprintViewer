@@ -13,6 +13,8 @@ internal sealed class MainWindow : Window
     private readonly Dictionary<AccountSession, HashSet<ScriptPermissionWindow>> _permissionDialogs = new();
     private readonly Dictionary<AccountSession, HashSet<TeleportOfferWindow>> _teleportDialogs = new();
     private readonly Dictionary<AccountSession, Dictionary<UUID, AvatarProfileWindow>> _profiles = new();
+    private readonly Dictionary<AccountSession, Dictionary<UUID, ResidentPaymentWindow>> _payments = new();
+    private readonly Action<string> _openWebLink;
     private readonly ChildWindowPresenter _childWindows;
     private readonly GlobalSettings _globalSettings;
     private readonly NotificationController _notifications;
@@ -20,8 +22,10 @@ internal sealed class MainWindow : Window
     private LoginWindow? _loginWindow;
     private GlobalSettingsWindow? _settingsWindow;
 
-    public MainWindow(GlobalSettings? settings = null, INotificationOutput? notificationOutput = null) : base(Program.ViewerName)
+    public MainWindow(GlobalSettings? settings = null, INotificationOutput? notificationOutput = null,
+        Action<string>? openWebLink = null) : base(Program.ViewerName)
     {
+        _openWebLink = openWebLink ?? ExternalLinks.Open;
         _childWindows = new ChildWindowPresenter(this);
         _globalSettings = settings ?? new GlobalSettings();
         _notifications = new NotificationController(_globalSettings, notificationOutput ?? new DesktopNotificationOutput());
@@ -116,6 +120,7 @@ internal sealed class MainWindow : Window
         session.TeleportOfferReceived += OnTeleportOfferReceived;
         session.NotificationReceived += OnNotification;
         session.AvatarProfileRequested += OnAvatarProfileRequested;
+        session.ChatLinkRequested += OnChatLinkRequested;
         session.InstantMessagesRequested += OnInstantMessagesRequested;
         widgets.AccountRow.ShowAll();
         widgets.Root.ShowAll();
@@ -151,6 +156,7 @@ internal sealed class MainWindow : Window
         session.TeleportOfferReceived -= OnTeleportOfferReceived;
         session.NotificationReceived -= OnNotification;
         session.AvatarProfileRequested -= OnAvatarProfileRequested;
+        session.ChatLinkRequested -= OnChatLinkRequested;
         session.InstantMessagesRequested -= OnInstantMessagesRequested;
         _notifications.CloseAccount(session.Id);
         if (_scriptDialogs.Remove(session, out var dialogs))
@@ -161,6 +167,8 @@ internal sealed class MainWindow : Window
             foreach (var dialog in offers.ToArray()) dialog.ClosePrompt();
         if (_profiles.Remove(session, out var profiles))
             foreach (var profile in profiles.Values.ToArray()) profile.CloseProfile();
+        if (_payments.Remove(session, out var payments))
+            foreach (var payment in payments.Values.ToArray()) payment.ClosePayment();
         widgets.Dispose();
         GtkWidgetLifetime.Remove(_accountRows, widgets.AccountRow);
         GtkWidgetLifetime.Remove(_pages, widgets.Root);
@@ -260,11 +268,33 @@ internal sealed class MainWindow : Window
         if (!_profiles.TryGetValue(session, out var profiles)) _profiles[session] = profiles = new();
         if (!profiles.TryGetValue(avatar, out var profile))
         {
-            profile = new AvatarProfileWindow(this, session, avatar);
+            profile = new AvatarProfileWindow(this, session, avatar, _openWebLink);
             profiles.Add(avatar, profile);
             profile.Destroyed += (_, _) => profiles.Remove(avatar);
         }
         ShowChildWindow(profile);
+    }
+
+    private void OnChatLinkRequested(AccountSession session, ProfileTextLink link)
+    {
+        if (!_sessions.ContainsKey(session) || !session.CanUseProfileLink(link)) return;
+        try
+        {
+            if (link.Action == ProfileLinkAction.Web) _openWebLink(link.Url);
+            else if (link.Action == ProfileLinkAction.PayResident)
+            {
+                session.RequestChatAvatarNames(new[] { link.AvatarId });
+                if (!_payments.TryGetValue(session, out var payments)) _payments[session] = payments = new();
+                if (!payments.TryGetValue(link.AvatarId, out var payment))
+                {
+                    payment = new ResidentPaymentWindow(this, session, link.AvatarId);
+                    payments.Add(link.AvatarId, payment);
+                    payment.Closed += () => payments.Remove(link.AvatarId);
+                }
+                ShowChildWindow(payment);
+            }
+        }
+        catch (Exception ex) { OnChatLine(session, "Unable to open link: " + session.RedactText(ex.Message)); }
     }
 
     private void OnInstantMessagesRequested(AccountSession session, UUID avatar)

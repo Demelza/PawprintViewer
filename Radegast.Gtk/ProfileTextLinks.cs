@@ -15,7 +15,7 @@ internal sealed record ProfileTextLink(string Url, ProfileLinkAction Action, UUI
         uri.AbsolutePath.StartsWith("/secondlife/", StringComparison.OrdinalIgnoreCase);
 }
 
-/// <summary>Second Life's [URL label] profile markup, plus ordinary avatar profile SLURLs.</summary>
+/// <summary>Second Life's [URL label] markup for chats and profiles, plus ordinary avatar profile SLURLs.</summary>
 internal static class ProfileTextLinks
 {
     private static readonly Regex Bracketed = new(

@@ -17,7 +17,8 @@ internal static class NativeChatLinkChecks
         using var fixture = new Fixture(account);
         var packets = fixture.CapturePackets();
         Connected(account, true);
-        using var main = new MainWindow(new GlobalSettings(Path.Combine(directory, "settings.json")), new Notices());
+        var browser = new List<string>();
+        using var main = new MainWindow(new GlobalSettings(Path.Combine(directory, "settings.json")), new Notices(), browser.Add);
         Invoke(main, "AddSession", account);
         main.ShowAll();
         var widgets = Field<Dictionary<AccountSession, SessionWidgets>>(main, "_sessions")[account];
@@ -32,7 +33,9 @@ internal static class NativeChatLinkChecks
         var friend = fixture.Friend("Alice Resident").UUID;
         var peer = fixture.Friend("Sender Resident").UUID;
         var groupId = UUID.Random();
-        var message = $"😀 [{ChatLinkChecks.Url(avatar)}], {ChatLinkChecks.Url(friend)} tail";
+        var message = $"😀 [{ChatLinkChecks.Url(avatar)}], {ChatLinkChecks.Url(friend)} tail\n" +
+            $"[{ProfileLinkChecks.Wishlist} Wishlist ♥] [{ChatLinkChecks.Url(friend)} Partner ♥] " +
+            $"[secondlife:///app/agent/{friend}/pay Pay ♥]";
         nearby.AppendLine("[22:54] HUD: /me " + message);
         account.SendInstantMessage(peer, message);
         fixture.Groups((groupId, "Test Group"));
@@ -40,7 +43,7 @@ internal static class NativeChatLinkChecks
         Field<Entry>(imPanel, "_input").Text = "unsent draft";
         var stage = 0;
         var result = 0;
-        GLib.Timeout.Add(300, () =>
+        GLib.Timeout.Add((uint)Math.Max(300, global::Gtk.Settings.Default.DoubleClickTime + 100), () =>
         {
             try
             {
@@ -217,7 +220,76 @@ internal static class NativeChatLinkChecks
                         Collect();
                         break;
                     case 16:
-                        Console.WriteLine("PASS native GTK profile links and action rows: IM tab, non-friend payment, teleport, add/remove friend, block/unblock and cleanup");
+                        // The profile IM action selected another resident above.
+                        imPanel.Open(peer);
+                        foreach (var view in views)
+                        {
+                            Check(view.Buffer.Text.Contains("Wishlist ♥ Partner ♥ Pay ♥") &&
+                                !view.Buffer.Text.Contains("https:") && !view.Buffer.Text.Contains("/pay"),
+                                "A chat view retained a labeled URL or lost its supplied label");
+                            foreach (var label in new[] { "Wishlist ♥", "Partner ♥", "Pay ♥" })
+                                Check(TagAt(view, label).Underline == Pango.Underline.Single, "A chat label was not clickable/styled as a link");
+                        }
+                        widgets.Tabs.CurrentPage = 0;
+                        break;
+                    case 17:
+                        Click(nearby, "Wishlist ♥");
+                        Click(nearby, "Pay ♥");
+                        Check(browser.SequenceEqual(new[] { ProfileLinkChecks.Wishlist }), "Nearby Chat opened the wrong web URL");
+                        CheckPayment();
+                        break;
+                    case 18:
+                        var previous = Payments()[friend];
+                        Click(nearby, "Pay ♥");
+                        Check(ReferenceEquals(previous, Payments()[friend]), "Repeated chat link clicks duplicated a payment prompt");
+                        Click(nearby, "Partner ♥");
+                        Check(Profiles(main, account).ContainsKey(friend), "A custom chat /about label opened the wrong profile");
+                        Profiles(main, account)[friend].CloseProfile();
+                        previous.ClosePayment();
+                        widgets.Tabs.CurrentPage = widgets.Tabs.PageNum(imPanel);
+                        break;
+                    case 19:
+                        Click(im, "Wishlist ♥");
+                        Click(im, "Pay ♥");
+                        Check(browser.Count == 2 && browser.Last() == ProfileLinkChecks.Wishlist, "An IM web label opened the wrong URL");
+                        CheckPayment();
+                        Payments()[friend].ClosePayment();
+                        widgets.Tabs.CurrentPage = widgets.Tabs.PageNum(groupPanel);
+                        break;
+                    case 20:
+                        Click(group, "Wishlist ♥");
+                        Click(group, "Pay ♥");
+                        Check(browser.Count == 3 && browser.Last() == ProfileLinkChecks.Wishlist, "A group-chat web label opened the wrong URL");
+                        CheckPayment();
+                        Payments()[friend].ClosePayment();
+                        break;
+                    case 21:
+                        Click(group, "Wishlist ♥", drag: true);
+                        Check(browser.Count == 3, "Selecting a chat label opened a browser");
+                        Connected(account, false);
+                        foreach (var view in views)
+                        {
+                            Invoke(view, "OnStateChanged", account);
+                            Check(!view.Buffer.GetIterAtOffset(Offset(view.Buffer.Text, "Pay ♥")).Tags.Any() &&
+                                TagAt(view, "Wishlist ♥").Underline == Pango.Underline.Single,
+                                "Disconnecting left a payment active or removed a web link");
+                        }
+                        Connected(account, true);
+                        foreach (var view in views)
+                        {
+                            Invoke(view, "OnStateChanged", account);
+                            Check(TagAt(view, "Pay ♥").Underline == Pango.Underline.Single,
+                                "Reconnecting did not reactivate chat payment labels");
+                        }
+                        break;
+                    case 22:
+                        group.Buffer.PlaceCursor(group.Buffer.StartIter);
+                        Click(group, "Pay ♥");
+                        var pending = Payments()[friend];
+                        Invoke(main, "RemoveSession", account);
+                        Check(pending.Handle == IntPtr.Zero, "Logging out retained a chat payment window");
+                        Collect();
+                        Console.WriteLine("PASS native GTK chat web/pay/about labels in Nearby Chat, IMs and Group Chats, original profile actions, selection, reconnect and window cleanup");
                         Application.Quit();
                         return false;
                 }
@@ -239,6 +311,19 @@ internal static class NativeChatLinkChecks
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
         return result;
+
+        Dictionary<UUID, ResidentPaymentWindow> Payments() =>
+            Field<Dictionary<AccountSession, Dictionary<UUID, ResidentPaymentWindow>>>(main, "_payments")[account];
+
+        void CheckPayment()
+        {
+            var payment = Payments()[friend];
+            Check(Field<UUID>(payment, "_recipient") == friend &&
+                ReferenceEquals(Field<AccountSession>(payment, "_session"), account) &&
+                Field<Label>(payment, "_recipientLabel").Text == "Pay Alice Resident" &&
+                !packets().OfType<MoneyTransferRequestPacket>().Any(),
+                "A chat payment label used the wrong recipient/account or sent money before confirmation");
+        }
     }
 
     private static Dictionary<UUID, AvatarProfileWindow> Profiles(MainWindow main, AccountSession account) =>
@@ -276,7 +361,8 @@ internal static class NativeChatLinkChecks
     private static void Connected(AccountSession account, bool value) =>
         typeof(Radegast.NetCom).GetProperty(nameof(Radegast.NetCom.IsLoggedIn))!.SetValue(account.Net, value);
     private static void Invoke(object target, string method, params object[] args) =>
-        target.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(target, args);
+        target.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic, null,
+            args.Select(arg => arg.GetType()).ToArray(), null)!.Invoke(target, args);
     private static T Field<T>(object target, string field)
     {
         for (var type = target.GetType(); type != null; type = type.BaseType)

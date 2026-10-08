@@ -155,7 +155,8 @@ internal sealed class ChatHistoryView : TextView
     {
         if (_connected == account.IsConnected) return;
         _connected = account.IsConnected;
-        OnNamesChanged(account);
+        // Payment links also change availability when the account reconnects.
+        RefreshText();
     }
 
     private void RefreshText()
@@ -205,7 +206,8 @@ internal sealed class ChatHistoryView : TextView
             !global::Gtk.Drag.CheckThreshold(this, _pressX, _pressY, (int)evnt.X, (int)evnt.Y))
         {
             if (link.Action == ProfileLinkAction.AvatarProfile) _session.OpenAvatarProfile(link.AvatarId);
-            else ProfileLinkActivated?.Invoke(link);
+            else if (ProfileLinkActivated != null) ProfileLinkActivated.Invoke(link);
+            else _session.OpenChatLink(link);
             return true;
         }
         return handled;

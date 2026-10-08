@@ -148,13 +148,17 @@ and a password-save failure is reported in that account's Nearby Chat.
   shorter legacy reply, including when it arrives later. Profiles start at the
   top; resolving names preserves the reading position. Grids without that
   capability use the legacy text supplied by the server.
-- Both profile text tabs render `[URL label]` links using the supplied label,
-  including spaces and Unicode. HTTP/HTTPS links (including map SLURLs) open
+- Nearby Chat, IMs, Group Chats and both profile text tabs render `[URL label]`
+  links using the supplied label, including spaces and Unicode. HTTP/HTTPS links
+  (including map SLURLs) open
   in the default browser. Agent `/about` links open that resident's profile;
   `/pay` links open a payment prompt for the linked resident on the originating
   account. Money is sent only after entering an amount and clicking **Pay**.
   Name and location restrictions also apply to labeled links. Unsupported or
   malformed markup stays as text.
+  For example, `[https://example.org Wishlist ♥]` displays the clickable text
+  `Wishlist ♥`. Formatting changes the display; messages sent to the grid and
+  stored in conversation histories retain their original text.
 - Profiles have **IM**, **Pay** and **Offer TP** on the first action row,
   **Add Friend**/**Remove Friend** and **Block**/**Unblock** on the second,
   with **Dismiss** underneath. IM selects that resident's conversation in the
@@ -358,10 +362,11 @@ limit. It requires a display and does not log in to a grid:
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --memory-smoke
 ```
 
-The native chat-link check tests name resolution in all three chat tabs and both
-profile text tabs, clicks through GTK events, delayed profile/name replies, text
-selection, profile actions and payment/window cleanup. It uses
-simulated packets and does not connect to a grid:
+The native chat-link check tests name resolution and labeled web/pay/about links
+in all three chat tabs, profile text links, clicks through GTK events, delayed
+profile/name replies, selection, reconnect and payment/window cleanup. It
+captures browser requests without opening a browser, uses simulated packets
+and does not connect to a grid:
 
 ```sh
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -p:TargetFrameworks=net10.0 -- --chat-links-smoke

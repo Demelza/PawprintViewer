@@ -6,6 +6,7 @@ internal sealed partial class AccountSession
 {
     public event Action<AccountSession>? AvatarNamesChanged;
     public event Action<AccountSession, UUID>? AvatarProfileRequested;
+    public event Action<AccountSession, ProfileTextLink>? ChatLinkRequested;
 
     public bool CanShowAvatarName(UUID id) => id == Client.Self.AgentID || !Rlv.Enabled ||
         Rlv.Service.Permissions.CanShowNames(id.Guid);
@@ -15,6 +16,13 @@ internal sealed partial class AccountSession
     public void OpenAvatarProfile(UUID id)
     {
         if (CanViewAvatarProfile(id)) AvatarProfileRequested?.Invoke(this, id);
+    }
+
+    public void OpenChatLink(ProfileTextLink link)
+    {
+        if (!CanUseProfileLink(link)) return;
+        if (link.Action == ProfileLinkAction.AvatarProfile) OpenAvatarProfile(link.AvatarId);
+        else ChatLinkRequested?.Invoke(this, link);
     }
 
     public string DisplayChatAvatarName(UUID id)
@@ -54,7 +62,7 @@ internal sealed partial class AccountSession
 
     public IReadOnlyList<ChatTextSpan> FormatChatText(string text)
     {
-        return FormatTextSpans(AvatarProfileLinks.Parse(text));
+        return FormatTextSpans(ProfileTextLinks.Parse(text));
     }
 
     public IReadOnlyList<ChatTextSpan> FormatProfileText(string text) => FormatTextSpans(ProfileTextLinks.Parse(text));

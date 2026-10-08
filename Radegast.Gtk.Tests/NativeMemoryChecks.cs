@@ -133,11 +133,13 @@ internal static class NativeMemoryChecks
         {
             var history = Field<ChatHistoryView>(widgets, "_chatHistory");
             var avatar = h.Fixture.Friend("Memory Link").UUID;
-            history.AppendLine($"Old link: {ChatLinkChecks.Url(avatar)}");
-            var oldTag = Field<Dictionary<ProfileTextLink, TextTag>>(history, "_links").Values.Single();
+            history.AppendLine($"Old link: {ChatLinkChecks.Url(avatar)} [https://example.org/old Old web label] " +
+                $"[secondlife:///app/agent/{avatar}/pay Old pay label]");
+            var oldTags = Field<Dictionary<ProfileTextLink, TextTag>>(history, "_links").Values.ToArray();
+            Check(oldTags.Length == 3, "Chat did not render the avatar, web and payment tags");
             for (var i = 0; i < ChatMemoryLimits.Messages + 20; i++) history.AppendLine($"Line {i} 😀\nsecond line");
             Check(!history.Buffer.Text.Contains("Old link") && !history.Buffer.Text.Contains("Line 19 ") &&
-                history.Buffer.Text.Contains($"Line {ChatMemoryLimits.Messages + 19} 😀") && oldTag.Handle == IntPtr.Zero &&
+                history.Buffer.Text.Contains($"Line {ChatMemoryLimits.Messages + 19} 😀") && oldTags.All(tag => tag.Handle == IntPtr.Zero) &&
                 history.Buffer.TagTable.Size == 0, "Chat trimming lost the newest line, split multiline/Unicode messages or retained old link tags");
             var longLine = new string('x', 2000);
             for (var i = 0; i < 600; i++) history.AppendLine(longLine);
