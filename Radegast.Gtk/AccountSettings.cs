@@ -7,6 +7,7 @@ internal sealed record AccountSettings
     public const int MaximumDelaySeconds = 86400;
     public const int MaximumReturnDelayMinutes = 1440;
     public bool AutoSit { get; init; }
+    public bool AutoSitOnRestartReturn { get; init; }
     public string AutoSitObjectId { get; init; } = "";
     public bool AutoReconnect { get; init; }
     public int ReconnectDelaySeconds { get; init; } = 30;

@@ -8,16 +8,12 @@ internal sealed class AccountSettingsPanel : ScrolledWindow
     private readonly CheckButton _rlvEnabled = new("Enable RLV / RLVa for this account");
     private readonly CheckButton _debug = new("Show RLV commands and replies in Nearby Chat");
     private readonly CheckButton _autoSit = new("Auto sit one minute after login");
+    private readonly CheckButton _autoSitRestart = new("Auto sit one minute after returning from a region restart");
     private readonly Entry _autoSitObject = new() { PlaceholderText = "Furniture UUID", MaxLength = 36 };
     private readonly Label _autoSitStatus = new("") { Xalign = 0, LineWrap = true };
     private readonly CheckButton _reconnect = new("Automatically reconnect after a disconnection");
     private readonly SpinButton _delay = new(1, AccountSettings.MaximumDelaySeconds, 1)
         { Numeric = true, Digits = 0, WidthChars = 7 };
-    private readonly Button _testDisconnect = new("Disconnect to test reconnect")
-    {
-        Halign = Align.Start,
-        TooltipText = "Disconnect this account and keep it in the account list. Automatic reconnect uses the configured delay if enabled."
-    };
     private readonly Label _status = new("") { Xalign = 0, LineWrap = true };
     private readonly CheckButton _restartTeleport = new("Teleport on region restart");
     private readonly Entry _restartRegion = new() { PlaceholderText = "Temporary destination region", MaxLength = 255 };
@@ -43,11 +39,13 @@ internal sealed class AccountSettingsPanel : ScrolledWindow
             { Xalign = 0, LineWrap = true }, false, false, 0);
         content.PackStart(new Separator(Orientation.Horizontal), false, false, 0);
         content.PackStart(_autoSit, false, false, 0);
+        content.PackStart(_autoSitRestart, false, false, 0);
         var furnitureRow = new Box(Orientation.Horizontal, 8);
         furnitureRow.PackStart(new Label("Furniture UUID") { Xalign = 0 }, false, false, 0);
         furnitureRow.PackStart(_autoSitObject, true, true, 0);
         content.PackStart(furnitureRow, false, false, 0);
-        content.PackStart(new Label("Waits 60 seconds after each successful login or reconnect. Leaves your seat unchanged if you are already sitting.")
+        content.PackStart(new Label("Both options use this furniture UUID and wait 60 seconds for objects to load. " +
+            "Restart returns require Teleport on region restart below. Leaves your seat unchanged if you are already sitting.")
             { Xalign = 0, LineWrap = true }, false, false, 0);
         content.PackStart(_autoSitStatus, false, false, 0);
         content.PackStart(new Separator(Orientation.Horizontal), false, false, 0);
@@ -56,7 +54,6 @@ internal sealed class AccountSettingsPanel : ScrolledWindow
         delayRow.PackStart(new Label("Reconnect delay (seconds)") { Xalign = 0 }, false, false, 0);
         delayRow.PackStart(_delay, false, false, 0);
         content.PackStart(delayRow, false, false, 0);
-        content.PackStart(_testDisconnect, false, false, 0);
         content.PackStart(new Label("Reconnect preferences are saved for this account and grid. Logging out or closing the viewer cancels reconnects.")
             { Xalign = 0, LineWrap = true }, false, false, 0);
         content.PackStart(new Separator(Orientation.Horizontal), false, false, 0);
@@ -85,10 +82,10 @@ internal sealed class AccountSettingsPanel : ScrolledWindow
         _rlvEnabled.Toggled += (_, _) => { if (!_refreshing) session.Rlv.SetEnabled(_rlvEnabled.Active); };
         _debug.Toggled += (_, _) => { if (!_refreshing) session.Rlv.DebugCommands = _debug.Active; };
         _autoSit.Toggled += (_, _) => Save();
+        _autoSitRestart.Toggled += (_, _) => Save();
         _autoSitObject.Changed += (_, _) => Save();
         _reconnect.Toggled += (_, _) => Save();
         _delay.ValueChanged += (_, _) => Save();
-        _testDisconnect.Clicked += (_, _) => _ = DisconnectForTestAsync();
         _restartTeleport.Toggled += (_, _) => Save();
         _restartRegion.Changed += (_, _) => Save();
         _restartX.ValueChanged += (_, _) => Save();
@@ -97,7 +94,6 @@ internal sealed class AccountSettingsPanel : ScrolledWindow
         _returnDelay.ValueChanged += (_, _) => Save();
         session.Rlv.Changed += Refresh;
         session.SettingsChanged += OnSettingsChanged;
-        session.StateChanged += OnStateChanged;
         session.RestartTeleportChanged += OnRestartTeleportChanged;
         session.AutoSitChanged += OnAutoSitChanged;
         Destroyed += (_, _) => Stop();
@@ -109,7 +105,8 @@ internal sealed class AccountSettingsPanel : ScrolledWindow
         if (_refreshing || _stopped) return;
         _session.UpdateSettings(_session.Settings with
         {
-            AutoSit = _autoSit.Active, AutoSitObjectId = _autoSitObject.Text.Trim(),
+            AutoSit = _autoSit.Active, AutoSitOnRestartReturn = _autoSitRestart.Active,
+            AutoSitObjectId = _autoSitObject.Text.Trim(),
             AutoReconnect = _reconnect.Active, ReconnectDelaySeconds = _delay.ValueAsInt,
             TeleportOnRegionRestart = _restartTeleport.Active, RestartDestinationRegion = _restartRegion.Text,
             RestartDestinationX = (float)_restartX.Value, RestartDestinationY = (float)_restartY.Value,
@@ -126,24 +123,6 @@ internal sealed class AccountSettingsPanel : ScrolledWindow
     {
         if (!_stopped) _restartStatus.Text = account.RestartTeleportStatus;
     }
-    private void OnStateChanged(AccountSession account)
-    {
-        if (!_stopped) _testDisconnect.Sensitive = account.CanTestDisconnect;
-    }
-
-    private async Task DisconnectForTestAsync()
-    {
-        if (_stopped) return;
-        try { await _session.DisconnectForReconnectTestAsync().ConfigureAwait(false); }
-        catch (Exception ex)
-        {
-            GtkDispatch.Post(() =>
-            {
-                if (!_stopped) _status.Text = $"Could not disconnect: {_session.RedactText(ex.Message)}";
-            });
-        }
-    }
-
     private void Refresh()
     {
         if (_stopped) return;
@@ -151,13 +130,13 @@ internal sealed class AccountSettingsPanel : ScrolledWindow
         _rlvEnabled.Active = _session.Rlv.Enabled;
         _debug.Active = _session.Rlv.DebugCommands;
         _autoSit.Active = _session.Settings.AutoSit;
+        _autoSitRestart.Active = _session.Settings.AutoSitOnRestartReturn;
         if (_autoSitObject.Text != _session.Settings.AutoSitObjectId) _autoSitObject.Text = _session.Settings.AutoSitObjectId;
-        _autoSitObject.Sensitive = _autoSit.Active;
+        _autoSitObject.Sensitive = _autoSit.Active || _autoSitRestart.Active;
         _autoSitStatus.Text = _session.AutoSitStatus;
         _reconnect.Active = _session.Settings.AutoReconnect;
         _delay.Value = _session.Settings.ReconnectDelaySeconds;
         _delay.Sensitive = _reconnect.Active;
-        _testDisconnect.Sensitive = _session.CanTestDisconnect;
         _restartTeleport.Active = _session.Settings.TeleportOnRegionRestart;
         if (_restartRegion.Text != _session.Settings.RestartDestinationRegion) _restartRegion.Text = _session.Settings.RestartDestinationRegion;
         _restartX.Value = _session.Settings.RestartDestinationX;
@@ -177,7 +156,6 @@ internal sealed class AccountSettingsPanel : ScrolledWindow
         _stopped = true;
         _session.Rlv.Changed -= Refresh;
         _session.SettingsChanged -= OnSettingsChanged;
-        _session.StateChanged -= OnStateChanged;
         _session.RestartTeleportChanged -= OnRestartTeleportChanged;
         _session.AutoSitChanged -= OnAutoSitChanged;
     }

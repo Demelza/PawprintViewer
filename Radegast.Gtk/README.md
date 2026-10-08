@@ -102,7 +102,7 @@ and a password-save failure is reported in that account's Nearby Chat.
   Teleport Offers, and Sim Restarts. All seven are enabled initially. Changes
   apply to every account and are saved in
   `$XDG_CONFIG_HOME/pawprint-viewer/settings.json` (normally
-  `~/.config/pawprint-viewer/settings.json`). **Test notification** checks delivery.
+  `~/.config/pawprint-viewer/settings.json`).
   Linux desktop popups use the system's `libnotify` runtime and notification daemon.
 - Messages already being viewed in the foreground stay quiet. Background menus
   notify without raising the viewer. Private IM popups show just the sender's
@@ -248,6 +248,12 @@ and a password-save failure is reported in that account's Nearby Chat.
   RLV sitting and distance restrictions apply. Editing the UUID during the first
   minute keeps the original deadline; enabling it later waits for the next login.
   Invalid UUIDs show a hint, and failed sits appear in Account Settings and Nearby Chat.
+- **Auto sit one minute after returning from a region restart** is a separate,
+  opt-in checkbox in the same section. It uses the same furniture UUID, waits
+  60 seconds after a confirmed automatic return, and works with login Auto Sit
+  disabled. Enable **Teleport on region restart** to use it. Ordinary teleports
+  and arrivals at the temporary region do not trigger it. Leaving the return
+  region or disabling either restart option cancels pending return sits.
 - **Account Settings** contains settings only: RLV/RLVa enable and chat diagnostics, Auto Sit,
   plus **Automatically reconnect after a disconnection** and **Reconnect delay
   (seconds)**. The active restriction list has been removed. Reconnect is off by
@@ -265,10 +271,6 @@ and a password-save failure is reported in that account's Nearby Chat.
   one-time MFA codes are never replayed. Reconnect keeps the current account's
   conversations/drafts and refreshes its inventory cache. These preference files
   contain no passwords; reconnect uses the credentials already held in memory.
-  **Disconnect to test reconnect** closes that account's connections while
-  leaving it in the left list. Enable automatic reconnect and set the delay
-  before clicking it to test recovery. With reconnect disabled, it stays
-  disconnected. The button is unavailable while disconnected or disconnecting.
   The unused UDP scene texture worker is disabled: LibreMetaverse 3.1.5 otherwise
   restarts it with a cancelled delay token after reconnect, causing an idle CPU
   spike. World-map tile downloads and HTTP appearance textures stay enabled.
@@ -370,8 +372,9 @@ It uses temporary account metadata and a fake keyring; no grid login is needed:
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --login-smoke
 ```
 
-The Account Settings check verifies Auto Sit's placement below RLV, checkbox,
-UUID validation and saving. It also simulates disconnects and advances a fake clock to
+The Account Settings check verifies both Auto Sit options below RLV, their shared
+UUID validation and saving, and the removal of the settings test buttons.
+It also simulates disconnects and advances a fake clock to
 test the reconnect and restart destination/delay controls, preference saving,
 reconnect status, inventory cache replacement and logout cleanup without a grid login:
 

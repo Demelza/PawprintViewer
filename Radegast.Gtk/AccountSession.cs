@@ -60,6 +60,7 @@ internal sealed partial class AccountSession : IDisposable
         _restartRecovery = new RegionRestartRecovery(_clock, _post, CurrentRestartLocation, FindRestartDestinationAsync,
             (region, position, token) => TeleportLocationAsync(region, position, false, token));
         _restartRecovery.Changed += OnRegionRestartChanged;
+        _restartRecovery.Returned += AutoSitOnRestartReturn;
         _seatAnimations = new SeatAnimationController(Client);
         Outfit = new CurrentOutfitFolder(Client);
         Rlv = new RlvSession(Client, Outfit, _post);
@@ -436,6 +437,7 @@ internal sealed partial class AccountSession : IDisposable
         ResetAutoSit();
         ResetReconnect();
         _restartRecovery.Changed -= OnRegionRestartChanged;
+        _restartRecovery.Returned -= AutoSitOnRestartReturn;
         _restartRecovery.Dispose();
         _restartNotifications.Dispose();
         ResetTeleportOffers();

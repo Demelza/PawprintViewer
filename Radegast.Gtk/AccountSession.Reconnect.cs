@@ -61,11 +61,14 @@ internal sealed partial class AccountSession
         settings.Validate();
         var reconnectChanged = Settings.AutoReconnect != settings.AutoReconnect ||
             Settings.ReconnectDelaySeconds != settings.ReconnectDelaySeconds;
-        var autoSitChanged = Settings.AutoSit != settings.AutoSit || Settings.AutoSitObjectId != settings.AutoSitObjectId;
+        var previous = Settings;
+        var autoSitChanged = previous.AutoSit != settings.AutoSit || previous.AutoSitObjectId != settings.AutoSitObjectId ||
+            previous.AutoSitOnRestartReturn != settings.AutoSitOnRestartReturn ||
+            previous.TeleportOnRegionRestart != settings.TeleportOnRegionRestart;
         Settings = settings;
         SettingsError = null;
         _restartRecovery.UpdateSettings(settings);
-        if (autoSitChanged) UpdateAutoSit();
+        if (autoSitChanged) UpdateAutoSitSettings(previous);
         if (reconnectChanged)
         {
             CancelReconnectTimer();

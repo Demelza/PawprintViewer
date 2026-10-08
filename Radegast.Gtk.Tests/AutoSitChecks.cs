@@ -13,16 +13,16 @@ internal static class AutoSitChecks
             var store = new AccountSettingsStore(directory);
             var who = new SavedLogin("Alice Resident", "https://grid.test/login");
             var target = UUID.Random().ToString();
-            Check(store.Load(who, out _) is { AutoSit: false, AutoSitObjectId: "" }, "Auto Sit was enabled by default");
-            var settings = new AccountSettings { AutoSit = true, AutoSitObjectId = target, AutoReconnect = true };
+            Check(store.Load(who, out _) is { AutoSit: false, AutoSitOnRestartReturn: false, AutoSitObjectId: "" }, "Auto Sit was enabled by default");
+            var settings = new AccountSettings { AutoSit = true, AutoSitOnRestartReturn = true, AutoSitObjectId = target, AutoReconnect = true };
             store.Save(who, settings);
             Check(new AccountSettingsStore(directory).Load(new SavedLogin("alice.resident", who.LoginUri), out _) == settings,
                 "Auto Sit did not survive an independent load or resident alias");
-            Check(!store.Load(new SavedLogin("Bob Resident", who.LoginUri), out _).AutoSit &&
-                !store.Load(new SavedLogin(who.AccountName, "https://other.test/login"), out _).AutoSit,
+            Check(store.Load(new SavedLogin("Bob Resident", who.LoginUri), out _) is { AutoSit: false, AutoSitOnRestartReturn: false } &&
+                store.Load(new SavedLogin(who.AccountName, "https://other.test/login"), out _) is { AutoSit: false, AutoSitOnRestartReturn: false },
                 "Auto Sit preferences leaked between residents or grids");
             File.WriteAllText(store.FilePath(who), "{\"AutoReconnect\":true}");
-            Check(store.Load(who, out _) is { AutoSit: false, AutoSitObjectId: "", AutoReconnect: true },
+            Check(store.Load(who, out _) is { AutoSit: false, AutoSitOnRestartReturn: false, AutoSitObjectId: "", AutoReconnect: true },
                 "Old settings files enabled Auto Sit or lost their existing preferences");
             store.Save(who, settings with { AutoSitObjectId = "incomplete" });
             Check(store.Load(who, out _).AutoSitObjectId == "incomplete", "Incomplete UUID edits could not be saved safely");
@@ -182,6 +182,61 @@ internal static class AutoSitChecks
         second.Account.UpdateSettings(second.Account.Settings with { AutoSit = false });
         await WaitUntil(() => !SitBusy(second.Account));
     }
+
+    public static async Task RestartReturnCancellationAndEdits()
+    {
+        foreach (var action in new[] { "disable", "disable-protection", "disconnect", "logout", "new-login", "leave", "dispose" })
+        {
+            using var h = new ReconnectHarness();
+            var packets = h.Fixture.CapturePackets();
+            var chair = h.Fixture.Prim(200);
+            h.Account.UpdateSettings(new() { AutoSitOnRestartReturn = true, TeleportOnRegionRestart = true,
+                AutoSitObjectId = chair.ID.ToString() });
+            h.Connect(); h.Clock.Advance(120);
+            Check(h.Clock.PendingTimers == 0 && !Requests(packets()).Any(), "Return-only Auto Sit ran at login");
+            RestartReturned(h);
+            Check(h.Clock.PendingTimers == 1, "The confirmed return did not schedule Auto Sit independently of login");
+            h.HoldPosts = true; h.Clock.Advance(60); h.HoldPosts = false;
+            using var elsewhere = new Simulator(h.Account.Client,
+                new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 13002), h.Fixture.Simulator.Handle + 256);
+            switch (action)
+            {
+                case "disable": h.Account.UpdateSettings(h.Account.Settings with { AutoSitOnRestartReturn = false }); break;
+                case "disable-protection": h.Account.UpdateSettings(h.Account.Settings with { TeleportOnRegionRestart = false }); break;
+                case "disconnect": h.Disconnect(); break;
+                case "logout": h.LoggedOut(); break;
+                case "new-login": h.Login(); break;
+                case "leave": RegionRestartChecks.ChangeSim(h.Account, elsewhere); break;
+                case "dispose": h.Account.Dispose(); break;
+            }
+            h.DrainPosts(); h.Clock.Advance(100);
+            Check(!Requests(packets()).Any() && h.Clock.PendingTimers == 0, $"{action} left a queued return Auto Sit alive");
+        }
+        using var edited = new ReconnectHarness();
+        var capture = edited.Fixture.CapturePackets();
+        var target = edited.Fixture.Prim(200);
+        edited.Account.UpdateSettings(new() { AutoSitOnRestartReturn = true, TeleportOnRegionRestart = true,
+            AutoSitObjectId = "incomplete" });
+        edited.Connect(); edited.Clock.Advance(120); RestartReturned(edited);
+        Check(edited.Clock.PendingTimers == 0 && edited.Account.AutoSitStatus.Contains("valid furniture UUID"),
+            "A restart return accepted an incomplete UUID");
+        edited.Clock.Advance(20);
+        edited.Account.UpdateSettings(edited.Account.Settings with { AutoSitObjectId = target.ID.ToString() });
+        edited.Connect(); // A duplicate login event must not disturb the return deadline.
+        edited.Clock.Advance(39);
+        Check(!Requests(capture()).Any(), "Editing the return UUID seated the avatar early");
+        edited.Clock.Advance(1);
+        Check(Requests(capture()).Single().TargetObject.TargetID == target.ID, "The edited UUID reset the return's 60-second loading delay");
+        edited.Account.UpdateSettings(edited.Account.Settings with { AutoSitOnRestartReturn = false });
+        await WaitUntil(() => !SitBusy(edited.Account));
+        edited.Fixture.Receive(new AvatarSitResponsePacket { SitObject = { ID = target.ID } });
+        await Task.Delay(40);
+        Check(!capture().OfType<AgentSitPacket>().Any(), "Disabling return Auto Sit accepted a late server reply");
+    }
+
+    private static void RestartReturned(ReconnectHarness h) => typeof(AccountSession)
+        .GetMethod("AutoSitOnRestartReturn", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(h.Account,
+            new object[] { new RestartLocation(new GridRegion { RegionHandle = h.Fixture.Simulator.Handle }, new(10, 20, 30)) });
 
     private static IEnumerable<AgentRequestSitPacket> Requests(IEnumerable<Packet> packets) => packets.OfType<AgentRequestSitPacket>();
     private static bool SitBusy(AccountSession account) => (int)typeof(AccountSession)

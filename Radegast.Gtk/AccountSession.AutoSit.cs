@@ -8,6 +8,8 @@ internal sealed partial class AccountSession
     private ITimer? _autoSitTimer;
     private CancellationTokenSource? _autoSitCancel;
     private DateTimeOffset? _autoSitDue;
+    private DateTimeOffset? _restartAutoSitDue;
+    private ulong _restartAutoSitRegion;
     private int _autoSitGeneration;
     private string _autoSitStatus = "";
 
@@ -15,6 +17,11 @@ internal sealed partial class AccountSession
     public event Action<AccountSession>? AutoSitChanged;
 
     private bool TryAutoSitTarget(out UUID target) => UUID.TryParse(Settings.AutoSitObjectId.Trim(), out target) && target != UUID.Zero;
+
+    private bool AutoSitEnabled(AccountSettings settings) => _restartAutoSitDue != null
+        ? settings.AutoSitOnRestartReturn && settings.TeleportOnRegionRestart : settings.AutoSit;
+
+    private bool AtAutoSitRegion => _restartAutoSitDue == null || Client.Network.CurrentSim?.Handle == _restartAutoSitRegion;
 
     private void SetAutoSitStatus(string text)
     {
@@ -36,6 +43,8 @@ internal sealed partial class AccountSession
     private void ResetAutoSit()
     {
         _autoSitDue = null;
+        _restartAutoSitDue = null;
+        _restartAutoSitRegion = 0;
         UpdateAutoSit();
     }
 
@@ -46,27 +55,57 @@ internal sealed partial class AccountSession
         UpdateAutoSit();
     }
 
+    private void AutoSitOnRestartReturn(RestartLocation origin)
+    {
+        if (_disposed || !IsConnected || Client.Network.CurrentSim?.Handle != origin.Region.RegionHandle) return;
+        _restartAutoSitRegion = origin.Region.RegionHandle;
+        _restartAutoSitDue = _clock.GetUtcNow() + AutoSitDelay;
+        UpdateAutoSit();
+    }
+
+    private void AutoSitLocationChanged()
+    {
+        if (AtAutoSitRegion || (_autoSitTimer == null && _autoSitCancel == null)) return;
+        CancelAutoSit();
+        SetAutoSitStatus("Auto Sit cancelled: the avatar left the return region.");
+    }
+
+    private void UpdateAutoSitSettings(AccountSettings previous)
+    {
+        // Changing the other trigger's checkbox must not interrupt a sit that
+        // is already scheduled or waiting for the server's reply.
+        if (previous.AutoSitObjectId == Settings.AutoSitObjectId &&
+            AutoSitEnabled(previous) == AutoSitEnabled(Settings) &&
+            (_autoSitTimer != null || _autoSitCancel != null)) return;
+        UpdateAutoSit();
+    }
+
     private void UpdateAutoSit()
     {
         CancelAutoSit();
         if (_disposed) return;
-        if (!Settings.AutoSit) { SetAutoSitStatus(""); return; }
+        if (!Settings.AutoSit && !Settings.AutoSitOnRestartReturn) { SetAutoSitStatus(""); return; }
         if (!TryAutoSitTarget(out _)) { SetAutoSitStatus("Enter a valid furniture UUID."); return; }
         var now = _clock.GetUtcNow();
-        if (!IsConnected || _autoSitDue is not { } due || due <= now)
+        if (!IsConnected || !AutoSitEnabled(Settings) || !AtAutoSitRegion ||
+            (_restartAutoSitDue ?? _autoSitDue) is not { } due || due <= now)
         {
-            SetAutoSitStatus("Auto Sit will run after the next login.");
+            SetAutoSitStatus(Settings.AutoSit ? "Auto Sit will run after the next login" +
+                (Settings.AutoSitOnRestartReturn ? " or return from a region restart." : ".")
+                : "Auto Sit will run after returning from a region restart.");
             return;
         }
         var generation = _autoSitGeneration;
         _autoSitTimer = _clock.CreateTimer(_ => _post(() => BeginAutoSit(generation)), null,
             due - now, Timeout.InfiniteTimeSpan);
-        SetAutoSitStatus("Auto Sit scheduled for one minute after login.");
+        SetAutoSitStatus(_restartAutoSitDue != null ? "Auto Sit scheduled for one minute after the restart return."
+            : "Auto Sit scheduled for one minute after login.");
     }
 
     private void BeginAutoSit(int generation)
     {
-        if (_disposed || generation != _autoSitGeneration || !Settings.AutoSit || !IsConnected || !TryAutoSitTarget(out var target)) return;
+        if (_disposed || generation != _autoSitGeneration || !AutoSitEnabled(Settings) || !IsConnected ||
+            !AtAutoSitRegion || !TryAutoSitTarget(out var target)) return;
         _autoSitTimer?.Dispose();
         _autoSitTimer = null;
         if (IsSitting) { SetAutoSitStatus("Already seated; Auto Sit skipped."); return; }

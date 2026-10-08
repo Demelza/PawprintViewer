@@ -30,18 +30,9 @@ internal sealed class GlobalSettingsWindow : Window
         _status.SetSizeRequest(360, -1);
         _status.Text = settings.LoadError ?? notifications.Error ?? "Changes apply immediately and are saved automatically.";
         content.PackStart(_status, false, false, 0);
-        var buttons = new Box(Orientation.Horizontal, 6);
-        var test = new Button("Test notification");
-        test.Clicked += (_, _) =>
-        {
-            notifications.Test();
-            _status.Text = notifications.Error ?? "Test notification sent.";
-        };
         var dismiss = new Button("Dismiss");
         dismiss.Clicked += (_, _) => CloseSettings();
-        buttons.PackStart(test, true, true, 0);
-        buttons.PackStart(dismiss, false, false, 0);
-        content.PackStart(buttons, false, false, 0);
+        content.PackStart(dismiss, false, false, 0);
     }
 
     private void AddCategory(Box content, NotificationCategory category, string label, string description)

@@ -19,8 +19,8 @@ internal static class NativeAccountSettingsChecks
         var panel = Field<AccountSettingsPanel>(widgets, "_settingsPanel");
         var reconnect = Field<CheckButton>(panel, "_reconnect");
         var delay = Field<SpinButton>(panel, "_delay");
-        var disconnect = Field<Button>(panel, "_testDisconnect");
         var autoSit = Field<CheckButton>(panel, "_autoSit");
+        var autoSitRestart = Field<CheckButton>(panel, "_autoSitRestart");
         var furniture = Field<Entry>(panel, "_autoSitObject");
         var restart = Field<CheckButton>(panel, "_restartTeleport");
         var restartRegion = Field<Entry>(panel, "_restartRegion");
@@ -42,6 +42,8 @@ internal static class NativeAccountSettingsChecks
                     case 0:
                         var globalWindow = new GlobalSettingsWindow(main, globalSettings, Field<NotificationController>(main, "_notifications"));
                         globalWindow.ShowAll();
+                        Check(!Descendants(globalWindow).OfType<Button>().Any(button => button.Label == "Test notification"),
+                            "Global Settings retained the test notification button");
                         var restartNotices = Descendants(globalWindow).OfType<CheckButton>().Single(toggle => toggle.Label == "Sim Restarts");
                         Check(restartNotices.Active, "Sim restart notifications were not enabled by default");
                         restartNotices.Active = false;
@@ -49,12 +51,14 @@ internal static class NativeAccountSettingsChecks
                             "The sim restart checkbox did not apply and save its value");
                         restartNotices.Active = true;
                         globalWindow.CloseSettings();
-                        Check(!reconnect.Active && delay.ValueAsInt == 30 && !delay.Sensitive && disconnect.Sensitive &&
+                        Check(!reconnect.Active && delay.ValueAsInt == 30 && !delay.Sensitive &&
                             !Descendants(panel).Any(child => child is TreeView), "Account Settings retained the restriction list or had incorrect reconnect defaults");
+                        Check(!Descendants(panel).OfType<Button>().Any(button => button.Label == "Disconnect to test reconnect"),
+                            "Account Settings retained the test reconnect button");
                         Check(((Label)widgets.Tabs.GetTabLabel(panel)).Text == "Account Settings", "The settings tab was renamed or moved");
                         Check(!restart.Active && !restartRegion.Sensitive && !returnDelay.Sensitive && returnDelay.ValueAsInt == 5,
                             "Restart protection was enabled by default or had incorrect control defaults");
-                        Check(!autoSit.Active && !furniture.Sensitive && furniture.Text == "", "Auto Sit controls had unsafe defaults");
+                        Check(!autoSit.Active && !autoSitRestart.Active && !furniture.Sensitive && furniture.Text == "", "Auto Sit controls had unsafe defaults");
                         var content = ((Box)autoSit.Parent).Children;
                         Check(Array.IndexOf(content, Field<CheckButton>(panel, "_debug")) < Array.IndexOf(content, autoSit) &&
                             Array.IndexOf(content, autoSit) < Array.IndexOf(content, reconnect), "Auto Sit was not directly below the RLV settings");
@@ -76,6 +80,12 @@ internal static class NativeAccountSettingsChecks
                         Check(h.Account.Settings.AutoSit && h.Account.Settings.AutoSitObjectId == furniture.Text && h.Clock.PendingTimers == 1 &&
                             h.Store.Load(new SavedLogin(h.Name, h.Grid.LoginURI), out _) == h.Account.Settings,
                             "The Auto Sit checkbox/UUID did not apply, schedule or persist");
+                        autoSit.Active = false;
+                        autoSitRestart.Active = true;
+                        Check(furniture.Sensitive && !h.Account.Settings.AutoSit && h.Account.Settings.AutoSitOnRestartReturn &&
+                            h.Clock.PendingTimers == 0 && h.Store.Load(new SavedLogin(h.Name, h.Grid.LoginURI), out _) == h.Account.Settings,
+                            "Restart return Auto Sit could not be enabled/saved independently with the shared UUID");
+                        autoSit.Active = true;
                         restart.Active = true;
                         restartRegion.Text = "Safe Region";
                         restartX.Value = 45.5;
@@ -93,12 +103,10 @@ internal static class NativeAccountSettingsChecks
                         Check(!restartRegion.Sensitive && !h.Account.Settings.TeleportOnRegionRestart,
                             "Turning restart protection off left its controls active");
                         restart.Active = true;
-                        disconnect.Click();
-                        Check(!disconnect.Sensitive, "The test disconnect button permitted duplicate requests");
+                        h.Disconnect();
                         break;
                     case 1:
                         Check(!h.Account.IsConnected && h.Account.Status.Contains("reconnect scheduled"), "The disconnected account was removed or lost its retry status");
-                        Check(!disconnect.Sensitive, "The test disconnect button remained active while disconnected");
                         h.Clock.Advance(1);
                         Check(h.Attempts == 1, "The GTK session reconnected before its configured delay");
                         break;
@@ -119,8 +127,8 @@ internal static class NativeAccountSettingsChecks
                         break;
                     case 4:
                         Check(h.Account.IsConnected && Field<LibreMetaverse.Inventory>(inventory, "_subscribedStore") == replacement &&
-                            !Field<HashSet<UUID>>(inventory, "_fetched").Contains(staleFolder) && disconnect.Sensitive,
-                            "Inventory or test button did not refresh after reconnect");
+                            !Field<HashSet<UUID>>(inventory, "_fetched").Contains(staleFolder),
+                            "Inventory did not refresh after reconnect");
                         h.Disconnect();
                         break;
                     case 5:
@@ -132,7 +140,7 @@ internal static class NativeAccountSettingsChecks
                     case 6:
                         GC.Collect(); GC.WaitForPendingFinalizers();
                         Check(h.Attempts == 2, "A removed account reconnected through a queued GTK callback");
-                        Console.WriteLine("PASS native GTK Auto Sit placement, checkbox/UUID validation and saving, restart controls, RLV controls, reconnect, inventory replacement and logout cleanup");
+                        Console.WriteLine("PASS native GTK independent login/return Auto Sit controls, shared UUID validation and saving, removed test buttons, restart/RLV controls, reconnect and logout cleanup");
                         Application.Quit();
                         return false;
                 }

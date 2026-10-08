@@ -42,6 +42,7 @@ internal sealed partial class AccountSession
             if (_disposed) return;
             _restartRecovery.LocationChanged();
             _restartNotifications.LocationChanged();
+            AutoSitLocationChanged();
         });
 
     private void OnRegionRestartAlert(object? sender, PacketReceivedEventArgs e)

@@ -18,6 +18,7 @@ internal sealed class RegionRestartRecovery : IDisposable
 
     public string Status { get; private set; } = "Restart protection is off.";
     public event Action? Changed;
+    public event Action<RestartLocation>? Returned;
 
     public RegionRestartRecovery(TimeProvider clock, Action<Action> post, Func<RestartLocation?> location,
         Func<string, CancellationToken, Task<GridRegion>> findRegion,
@@ -159,7 +160,12 @@ internal sealed class RegionRestartRecovery : IDisposable
             if (!IsCurrent(trip)) return;
             var current = _location();
             if (current?.Region.RegionHandle == trip.Origin.Region.RegionHandle)
+            {
                 Cancel("Returned to the original region.");
+                // Only a completed automatic return emits this event. A manual
+                // return while waiting, or a stale teleport callback, does not.
+                Returned?.Invoke(trip.Origin);
+            }
             else if (current?.Region.RegionHandle != trip.TemporaryRegion)
                 Cancel("The avatar left the temporary region. Return cancelled.");
             else ScheduleReturn(trip, TimeSpan.FromMinutes(1), error?.Message ?? "The original region was not reached.");

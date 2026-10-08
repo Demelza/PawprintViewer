@@ -97,6 +97,15 @@ waits for the next login. Invalid/zero UUIDs schedule no work, and already seate
 avatars keep their seat. Disconnect, logout, new login, disabling or disposal
 cancels both queued callbacks and an outstanding sit handshake.
 
+A separate opt-in checkbox enables Auto Sit after an automatic restart return,
+using the same UUID and a fresh 60-second loading deadline. It works with login
+Auto Sit disabled and requires restart teleport protection. The restart handler
+emits a completion event only after confirming arrival in the original region;
+backup arrivals, manual teleports, failed returns and stale callbacks emit none.
+Disabling the return option or restart protection, leaving the return region,
+disconnecting or closing the account cancels pending sits. Changing the other
+trigger's checkbox leaves an active sit intact. Both options default to off.
+
 The UUID identifies a loaded rezzed root object in a connected simulator. Auto
 Sit shares the normal sit request/response and server seat-confirmation flow,
 including RLV sit/distance checks and animation handling. UUID targeting is not
@@ -197,11 +206,6 @@ subscriptions and clears stale folder request state after the new login.
 Headless checks use a fake clock to cover retry ordering, cancellation, independent
 accounts, authentication challenges and saving failures. The native settings
 check also exercises GTK controls, inventory replacement and logout cleanup.
-The **Disconnect to test reconnect** button closes the selected account's actual
-network connections through the SDK timeout shutdown path, which raises the
-normal disconnect event and schedules recovery if enabled. It retains the
-account's widgets and preferences and is disabled during/disconnected after the
-request, then re-enabled on connection. The logout action still cancels retries.
 
 The GTK account disables LibreMetaverse 3.1.5's unused UDP scene texture pipeline
 before login. Its shutdown cancels a token that startup never replaces; after

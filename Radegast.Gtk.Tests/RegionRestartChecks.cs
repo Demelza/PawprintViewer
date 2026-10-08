@@ -230,7 +230,48 @@ internal static class RegionRestartChecks
         Check(pending.Clock.PendingTimers == 0, "A cancelled teleport started the return timer");
     }
 
-    public static async Task AccountPacketsAndPermissions()
+    public static async Task ReturnCompletion()
+    {
+        using var h = new RecoveryHarness();
+        var returned = new List<RestartLocation>();
+        h.Recovery.Returned += returned.Add;
+        h.Warn(h.Home.RegionHandle);
+        Check(returned.Count == 0, "Arrival at the backup region was reported as a return");
+        h.FailReturn = true; h.Clock.Advance(120);
+        Check(returned.Count == 0, "An unavailable original region was reported as a completed return");
+        h.FailReturn = false;
+        h.Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.Clock.Advance(60);
+        Check(returned.Count == 0, "An in-flight return was reported as complete before arrival");
+        h.Gate.SetResult();
+        await WaitUntil(() => returned.Count == 1);
+        Check(returned.Single().Region.RegionHandle == h.Home.RegionHandle && returned.Single().Position == new Vector3(10, 20, 30),
+            "The completed return lost its original location");
+        h.Recovery.LocationChanged(); h.Clock.Advance(5000);
+        Check(returned.Count == 1, "The same return was reported more than once");
+
+        using var manual = new RecoveryHarness();
+        var manualReturns = 0;
+        manual.Recovery.Returned += _ => manualReturns++;
+        manual.Warn(manual.Home.RegionHandle);
+        manual.Current = new(manual.Home, new(10, 20, 30));
+        manual.Recovery.LocationChanged(); manual.Clock.Advance(5000);
+        Check(manualReturns == 0 && manual.Calls.Count == 1, "A manual teleport was reported as an automated restart return");
+
+        using var stale = new RecoveryHarness();
+        var staleReturns = 0;
+        stale.Recovery.Returned += _ => staleReturns++;
+        stale.Warn(stale.Home.RegionHandle);
+        stale.HoldPosts = true; stale.Clock.Advance(120);
+        stale.Recovery.UpdateSettings(stale.Settings with { TeleportOnRegionRestart = false });
+        stale.HoldPosts = false; stale.DrainPosts();
+        Check(staleReturns == 0, "A cancelled return's queued callback reported success");
+    }
+
+    public static Task AccountPacketsAndPermissions() => AccountPacketsAndPermissions(false);
+    public static Task AccountReturnAutoSit() => AccountPacketsAndPermissions(true);
+
+    private static async Task AccountPacketsAndPermissions(bool autoSitOnReturn)
     {
         using var h = new ReconnectHarness();
         using var other = new ReconnectHarness(name: "Other Resident");
@@ -241,9 +282,12 @@ internal static class RegionRestartChecks
         h.Account.Client.Self.RelativePosition = new(10, 20, 30);
         var packets = f.CapturePackets();
         var otherPackets = other.Fixture.CapturePackets();
+        var chair = f.Prim(200);
+        var seat = f.Prim(201, chair.LocalID);
         h.Account.UpdateSettings(new()
         {
             TeleportOnRegionRestart = true, RestartDestinationRegion = "Safe", ReturnDelayMinutes = 2,
+            AutoSitOnRestartReturn = autoSitOnReturn, AutoSitObjectId = chair.ID.ToString(),
             RestartDestinationX = 45, RestartDestinationY = 55, RestartDestinationZ = 65
         });
         using var safe = new Simulator(h.Account.Client, new IPEndPoint(IPAddress.Loopback, 13001),
@@ -302,9 +346,29 @@ internal static class RegionRestartChecks
             "Return forgot the original region or exact coordinates");
         ChangeSim(h.Account, f.Simulator);
         f.Receive(LocalTeleport(f.Owner, new(15, 25, 35)));
-        await WaitUntil(() => h.Account.RestartTeleportStatus.StartsWith("Returned"));
-        Check(h.Clock.PendingTimers == 0 && !otherPackets().OfType<TeleportLocationRequestPacket>().Any(),
+        await WaitUntil(() => h.Account.RestartTeleportStatus.StartsWith("Returned") &&
+            (!autoSitOnReturn || h.Account.AutoSitStatus.Contains("restart return")));
+        Check(h.Clock.PendingTimers == (autoSitOnReturn ? 1 : 0) && !otherPackets().OfType<TeleportLocationRequestPacket>().Any(),
             "Completed recovery left a timer or teleported another account");
+        if (!autoSitOnReturn) return;
+        Check(!h.Account.Settings.AutoSit, "The return-only test accidentally enabled login Auto Sit");
+        h.Clock.Advance(59);
+        Check(!packets().OfType<AgentRequestSitPacket>().Any(), "Return Auto Sit did not allow the objects to load for a minute");
+        h.Clock.Advance(1);
+        var sit = packets().OfType<AgentRequestSitPacket>().Single();
+        Check(sit.AgentData.AgentID == f.Owner && sit.TargetObject.TargetID == chair.ID && h.Clock.PendingTimers == 0,
+            "Restart Auto Sit used a different account, furniture UUID or repeated timer");
+        h.Account.UpdateSettings(h.Account.Settings with { AutoSit = true });
+        h.Account.UpdateSettings(h.Account.Settings with { AutoSit = false });
+        f.Receive(new AvatarSitResponsePacket { SitObject = { ID = seat.ID } });
+        var sent = new List<Packet>();
+        await WaitUntil(() => { sent.AddRange(packets()); return sent.OfType<AgentSitPacket>().Any(); });
+        Check(!h.Account.AutoSitStatus.Contains("completed"), "Restart Auto Sit succeeded without a server-confirmed seat");
+        f.ChangeSeat(seat.LocalID);
+        await WaitUntil(() => h.Account.AutoSitStatus == "Auto Sit completed.");
+        h.Clock.Advance(3600);
+        Check(h.Account.IsSitting && h.Clock.PendingTimers == 0 && !packets().OfType<AgentRequestSitPacket>().Any() &&
+            !otherPackets().OfType<AgentRequestSitPacket>().Any(), "Completed return Auto Sit repeated or affected another account");
     }
 
     private static TeleportLocalPacket LocalTeleport(UUID agent, Vector3 position) => new()
