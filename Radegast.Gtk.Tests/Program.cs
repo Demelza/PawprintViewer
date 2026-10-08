@@ -21,6 +21,12 @@ if (args.Contains("--memory-smoke", StringComparer.Ordinal)) return NativeMemory
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Auto Sit preferences persist per resident/grid with safe defaults and incomplete UUID edits", AutoSitChecks.Preferences),
+    ("Auto Sit waits one minute, keeps duplicate login deadlines and requires matching server seat confirmation", AutoSitChecks.TimingAndConfirmation),
+    ("Disabling, disconnecting, logging out, new login or disposal cancel queued and active Auto Sit requests", AutoSitChecks.Cancellation),
+    ("UUID edits keep the login deadline, reconnect starts a fresh minute and late enabling waits for the next login", AutoSitChecks.EditsAndReconnect),
+    ("Auto Sit respects RLV, existing seats and invalid/missing/attachment UUIDs without repeated work", AutoSitChecks.PermissionsAndInvalidTargets),
+    ("Multiple accounts keep Auto Sit UUIDs, timers and cancellations isolated", AutoSitChecks.AccountIsolation),
     ("IM and group chat histories retain recent messages within count/text budgets, preserving drafts and Unicode", ChatMemoryChecks.Retention),
     ("Sim restart reminders notify once per minute with live remaining time and no duplicate or stale popups", RegionRestartNotificationChecks.TimingAndUpdates),
     ("Changing regions, disconnecting, cancelling or disposing stops queued sim restart reminders", RegionRestartNotificationChecks.Cancellation),

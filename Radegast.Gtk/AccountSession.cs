@@ -95,6 +95,7 @@ internal sealed partial class AccountSession : IDisposable
         Net.LoginOptions.LastName = parts.Length > 1 ? parts[1] : "Resident";
         Net.LoginOptions.Password = password;
         Net.LoginOptions.Grid = grid;
+        ResetAutoSit();
         ResetReconnect();
         _restartRecovery.Cancel("Pending return cancelled by a new login.");
         _restartNotifications.Cancel();
@@ -248,12 +249,14 @@ internal sealed partial class AccountSession : IDisposable
             ReconnectOnLoginProgress(status, message, reason);
             if (status == LoginStatus.Success)
             {
+                AutoSitOnLogin();
                 _friendPresence.Connected();
                 Name = Client.Self.Name;
                 Client.Self.RequestMuteList();
                 RequestGroups();
                 _ = RetrieveOfflineInstantMessagesAsync();
             }
+            else if (status == LoginStatus.Failed) ResetAutoSit();
             StateChanged?.Invoke(this);
             LoginProgress?.Invoke(this, status, message, reason);
         });
@@ -291,6 +294,7 @@ internal sealed partial class AccountSession : IDisposable
     {
         if (_disposed) return;
         Status = status;
+        ResetAutoSit();
         Interlocked.Exchange(ref _serverTeleportBusyUntil, 0);
         _restartRecovery.Disconnected();
         _restartNotifications.Cancel();
@@ -429,6 +433,7 @@ internal sealed partial class AccountSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        ResetAutoSit();
         ResetReconnect();
         _restartRecovery.Changed -= OnRegionRestartChanged;
         _restartRecovery.Dispose();

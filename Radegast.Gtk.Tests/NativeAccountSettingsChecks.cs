@@ -20,6 +20,8 @@ internal static class NativeAccountSettingsChecks
         var reconnect = Field<CheckButton>(panel, "_reconnect");
         var delay = Field<SpinButton>(panel, "_delay");
         var disconnect = Field<Button>(panel, "_testDisconnect");
+        var autoSit = Field<CheckButton>(panel, "_autoSit");
+        var furniture = Field<Entry>(panel, "_autoSitObject");
         var restart = Field<CheckButton>(panel, "_restartTeleport");
         var restartRegion = Field<Entry>(panel, "_restartRegion");
         var restartX = Field<SpinButton>(panel, "_restartX");
@@ -52,6 +54,10 @@ internal static class NativeAccountSettingsChecks
                         Check(((Label)widgets.Tabs.GetTabLabel(panel)).Text == "Account Settings", "The settings tab was renamed or moved");
                         Check(!restart.Active && !restartRegion.Sensitive && !returnDelay.Sensitive && returnDelay.ValueAsInt == 5,
                             "Restart protection was enabled by default or had incorrect control defaults");
+                        Check(!autoSit.Active && !furniture.Sensitive && furniture.Text == "", "Auto Sit controls had unsafe defaults");
+                        var content = ((Box)autoSit.Parent).Children;
+                        Check(Array.IndexOf(content, Field<CheckButton>(panel, "_debug")) < Array.IndexOf(content, autoSit) &&
+                            Array.IndexOf(content, autoSit) < Array.IndexOf(content, reconnect), "Auto Sit was not directly below the RLV settings");
                         inventory.StartLoading();
                         reconnect.Active = true;
                         delay.Value = 2;
@@ -62,6 +68,14 @@ internal static class NativeAccountSettingsChecks
                         rlv.Active = false;
                         Check(!h.Account.Rlv.Enabled, "The RLV enable control stopped working");
                         rlv.Active = true;
+                        autoSit.Active = true;
+                        furniture.Text = "incomplete";
+                        Check(furniture.Sensitive && Field<Label>(panel, "_autoSitStatus").Text.Contains("valid furniture UUID") &&
+                            h.Clock.PendingTimers == 0, "Incomplete UUID entry crashed, lost feedback or scheduled Auto Sit");
+                        furniture.Text = UUID.Random().ToString();
+                        Check(h.Account.Settings.AutoSit && h.Account.Settings.AutoSitObjectId == furniture.Text && h.Clock.PendingTimers == 1 &&
+                            h.Store.Load(new SavedLogin(h.Name, h.Grid.LoginURI), out _) == h.Account.Settings,
+                            "The Auto Sit checkbox/UUID did not apply, schedule or persist");
                         restart.Active = true;
                         restartRegion.Text = "Safe Region";
                         restartX.Value = 45.5;
@@ -118,7 +132,7 @@ internal static class NativeAccountSettingsChecks
                     case 6:
                         GC.Collect(); GC.WaitForPendingFinalizers();
                         Check(h.Attempts == 2, "A removed account reconnected through a queued GTK callback");
-                        Console.WriteLine("PASS native GTK global restart notification checkbox, account settings, restart destination/delay controls, preference saving, RLV controls, reconnect status, inventory replacement and logout cleanup");
+                        Console.WriteLine("PASS native GTK Auto Sit placement, checkbox/UUID validation and saving, restart controls, RLV controls, reconnect, inventory replacement and logout cleanup");
                         Application.Quit();
                         return false;
                 }

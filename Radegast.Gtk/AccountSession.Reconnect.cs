@@ -51,6 +51,7 @@ internal sealed partial class AccountSession
         Settings = _settingsStore.Load(identity, out var error);
         SettingsError = error;
         _restartRecovery.UpdateSettings(Settings);
+        UpdateAutoSit();
         SettingsChanged?.Invoke(this);
     }
 
@@ -60,9 +61,11 @@ internal sealed partial class AccountSession
         settings.Validate();
         var reconnectChanged = Settings.AutoReconnect != settings.AutoReconnect ||
             Settings.ReconnectDelaySeconds != settings.ReconnectDelaySeconds;
+        var autoSitChanged = Settings.AutoSit != settings.AutoSit || Settings.AutoSitObjectId != settings.AutoSitObjectId;
         Settings = settings;
         SettingsError = null;
         _restartRecovery.UpdateSettings(settings);
+        if (autoSitChanged) UpdateAutoSit();
         if (reconnectChanged)
         {
             CancelReconnectTimer();

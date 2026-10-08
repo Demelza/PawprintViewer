@@ -68,7 +68,7 @@ internal sealed partial class AccountSession
         return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    private string? ObjectInteractionError(NearbyObject item, out Primitive? prim, out double distance)
+    private string? ObjectInteractionError(NearbyObject item, out Primitive? prim, out double distance, bool requireNearby = true)
     {
         prim = null;
         distance = 0;
@@ -77,13 +77,15 @@ internal sealed partial class AccountSession
             !item.Simulator.ObjectsPrimitives.TryGetValue(item.LocalId, out prim) ||
             prim.ID != item.Id || !IsRezzedRoot(prim)) return "This object is no longer available.";
         distance = ObjectDistance(item.Simulator, prim, Client.Self.GlobalPosition);
-        if (!double.IsFinite(distance) || distance > ObjectRadius) return "This object is outside the 50 m radius.";
+        if (!double.IsFinite(distance) || (requireNearby && distance > ObjectRadius)) return "This object is outside the 50 m radius.";
         return null;
     }
 
-    public string? ObjectSitError(NearbyObject item)
+    public string? ObjectSitError(NearbyObject item) => ObjectSitError(item, true);
+
+    private string? ObjectSitError(NearbyObject item, bool requireNearby)
     {
-        if (ObjectInteractionError(item, out _, out var distance) is { } error) return error;
+        if (ObjectInteractionError(item, out _, out var distance, requireNearby) is { } error) return error;
         if (item.Simulator == Client.Network.CurrentSim && IsSeatInObject(item.Simulator, Client.Self.SittingOn, item.LocalId))
             return "You are already sitting on this object.";
         if (Rlv.Enabled)
@@ -138,9 +140,29 @@ internal sealed partial class AccountSession
         return false;
     }
 
-    public async Task SitOnObjectAsync(NearbyObject item, CancellationToken token = default)
+    private Task SitOnFurnitureAsync(UUID id, CancellationToken token)
     {
-        if (ObjectSitError(item) is { } error) throw new InvalidOperationException(error);
+        token.ThrowIfCancellationRequested();
+        if (_disposed || !IsConnected || Client.Network.CurrentSim is not { } current)
+            throw new InvalidOperationException("This account is disconnected.");
+        Simulator[] simulators;
+        try { simulators = Client.Network.Simulators.ToArray(); }
+        catch (ArgumentException) { simulators = Array.Empty<Simulator>(); }
+        foreach (var sim in simulators.Append(current).Distinct())
+        {
+            if (sim != current && !sim.Connected) continue;
+            var furniture = sim.ObjectsPrimitives.Values.FirstOrDefault(prim => prim.ID == id && IsRezzedRoot(prim));
+            if (furniture != null)
+                return SitOnObjectAsync(new(id, furniture.LocalID, sim, furniture.Properties?.Name ?? "Furniture", 0, false), token, false);
+        }
+        throw new InvalidOperationException("The furniture UUID was not found in the connected regions.");
+    }
+
+    public Task SitOnObjectAsync(NearbyObject item, CancellationToken token = default) => SitOnObjectAsync(item, token, true);
+
+    private async Task SitOnObjectAsync(NearbyObject item, CancellationToken token, bool requireNearby)
+    {
+        if (ObjectSitError(item, requireNearby) is { } error) throw new InvalidOperationException(error);
         if (Interlocked.CompareExchange(ref _sitInProgress, 1, 0) != 0)
             throw new InvalidOperationException("Another sit request is still waiting for the server.");
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -164,7 +186,7 @@ internal sealed partial class AccountSession
         try
         {
             cancel.Token.ThrowIfCancellationRequested();
-            if (ObjectSitError(item) is { } changed) throw new InvalidOperationException(changed);
+            if (ObjectSitError(item, requireNearby) is { } changed) throw new InvalidOperationException(changed);
             if (item.Simulator == Client.Network.CurrentSim) Client.Self.RequestSit(item.Id, Vector3.Zero);
             else Client.Network.SendPacket(new AgentRequestSitPacket
             {
@@ -174,7 +196,7 @@ internal sealed partial class AccountSession
             await response.Task.WaitAsync(TimeSpan.FromSeconds(10), cancel.Token).ConfigureAwait(false);
             cancel.Token.ThrowIfCancellationRequested();
             // Recheck locks and the live object, rather than relying on the row's snapshot.
-            if (ObjectSitError(item) is { } latest) throw new InvalidOperationException(latest);
+            if (ObjectSitError(item, requireNearby) is { } latest) throw new InvalidOperationException(latest);
             if (item.Simulator == Client.Network.CurrentSim) Client.Self.Sit();
             else Client.Network.SendPacket(new AgentSitPacket
             {

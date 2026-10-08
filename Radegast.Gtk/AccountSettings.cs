@@ -6,6 +6,8 @@ internal sealed record AccountSettings
 {
     public const int MaximumDelaySeconds = 86400;
     public const int MaximumReturnDelayMinutes = 1440;
+    public bool AutoSit { get; init; }
+    public string AutoSitObjectId { get; init; } = "";
     public bool AutoReconnect { get; init; }
     public int ReconnectDelaySeconds { get; init; } = 30;
     public bool TeleportOnRegionRestart { get; init; }
@@ -17,6 +19,9 @@ internal sealed record AccountSettings
 
     public void Validate()
     {
+        // Keep incomplete UUID edits saveable; the scheduler only accepts valid targets.
+        if (AutoSitObjectId == null || AutoSitObjectId.Length > 36)
+            throw new ArgumentOutOfRangeException(nameof(AutoSitObjectId), "Enter a furniture UUID of up to 36 characters.");
         if (ReconnectDelaySeconds is < 1 or > MaximumDelaySeconds)
             throw new ArgumentOutOfRangeException(nameof(ReconnectDelaySeconds), "Reconnect delay must be between 1 and 86400 seconds.");
         if (ReturnDelayMinutes is < 1 or > MaximumReturnDelayMinutes)

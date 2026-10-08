@@ -40,7 +40,7 @@ account and connection state.
 - The central tab strip belongs to the selected account. Initial tabs are
   Nearby Chat, Friends, IMs, Group Chats, Inventory, Attachments, Objects, Map,
   and Account Settings. Account Settings currently
-  contains RLV controls and per-account automatic reconnect settings.
+  contains RLV controls, Auto Sit and per-account automatic reconnect settings.
 - **Global Settings** is below the add-account button. Notification category
   switches there apply to every account and persist between runs.
 - The right pane always shows nearby avatars for the selected account, ordered
@@ -86,6 +86,23 @@ account and connection state.
    in both GTK controls and outfit operations, including replacement of locked
    items. Load shared inventory only when queried, and advertise features that
    are unavailable in this client through the protocol blacklist.
+
+## Auto Sit checkpoint
+
+Account Settings puts an opt-in Auto Sit checkbox and furniture UUID field
+directly below the RLV controls. Settings are saved per resident/grid. Each
+successful login or reconnect sets a single deadline 60 seconds later; duplicate
+success events and UUID edits keep that deadline. Enabling after the deadline
+waits for the next login. Invalid/zero UUIDs schedule no work, and already seated
+avatars keep their seat. Disconnect, logout, new login, disabling or disposal
+cancels both queued callbacks and an outstanding sit handshake.
+
+The UUID identifies a loaded rezzed root object in a connected simulator. Auto
+Sit shares the normal sit request/response and server seat-confirmation flow,
+including RLV sit/distance checks and animation handling. UUID targeting is not
+limited by the Objects tab's 50 m list radius. Status and failures appear in
+Account Settings, with failures also reported in Nearby Chat. The one-shot timer
+uses the account's time provider and introduces no polling loop.
 
 ## Remembered logins checkpoint
 

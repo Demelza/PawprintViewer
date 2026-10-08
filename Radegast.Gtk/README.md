@@ -238,7 +238,17 @@ and a password-save failure is reported in that account's Nearby Chat.
   pending prompts.
 - Common system folders stay at the top of My Inventory; the Type column uses
   20% of the inventory list, and the fixed details pane uses 25% of the view.
-- **Account Settings** contains settings only: RLV/RLVa enable and chat diagnostics,
+- **Auto sit one minute after login**, directly below the RLV controls in
+  **Account Settings**, is off by default. Enable it and enter the furniture's
+  root-object UUID. It waits 60 seconds after each successful login or automatic
+  reconnect, then requests a sit and waits for the server to confirm. Preferences
+  are saved per account and grid. If already seated, it leaves the current seat
+  unchanged. Disabling it, disconnecting, logging out or closing the account
+  cancels pending requests. The furniture must be loaded in a connected region;
+  RLV sitting and distance restrictions apply. Editing the UUID during the first
+  minute keeps the original deadline; enabling it later waits for the next login.
+  Invalid UUIDs show a hint, and failed sits appear in Account Settings and Nearby Chat.
+- **Account Settings** contains settings only: RLV/RLVa enable and chat diagnostics, Auto Sit,
   plus **Automatically reconnect after a disconnection** and **Reconnect delay
   (seconds)**. The active restriction list has been removed. Reconnect is off by
   default; its default delay is 30 seconds, adjustable from 1 to 86400 seconds.
@@ -360,7 +370,8 @@ It uses temporary account metadata and a fake keyring; no grid login is needed:
 G_DEBUG=fatal-criticals dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --login-smoke
 ```
 
-The Account Settings check simulates disconnects and advances a fake clock to
+The Account Settings check verifies Auto Sit's placement below RLV, checkbox,
+UUID validation and saving. It also simulates disconnects and advances a fake clock to
 test the reconnect and restart destination/delay controls, preference saving,
 reconnect status, inventory cache replacement and logout cleanup without a grid login:
 
