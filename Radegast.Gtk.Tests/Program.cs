@@ -28,6 +28,15 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Early RLV commands wait for inventory capabilities and session resets cancel old startup requests", InventoryCacheChecks.EarlyRlvAndReset),
     ("Inventory cache batches disk writes, stops subscriptions and leaves idle accounts without polling timers", InventoryCacheChecks.SavingAndIdleResources),
     ("Account login restores after the authoritative skeleton, warms COF targets and cancels cache work on disconnect", InventoryCacheChecks.AccountLoginLifecycle),
+    ("Repeated RLV outfit swaps preserve confirmed COF membership and never replay attachments after baking", OutfitChecks.RepeatedSwaps),
+    ("Startup baking does not wait for a rendered avatar and refreshes canonical COF versions on mismatch", OutfitChecks.StartupAndCanonicalVersion),
+    ("A late startup bake cannot restore the outfit replaced by a newer RLV command", OutfitChecks.LateBakeCannotUndoOutfit),
+    ("Outfit changes await AIS acknowledgements, retain canonical versions and allow retry after failure", OutfitChecks.AcknowledgementsAndFailures),
+    ("Attachment replacement and layered clothing keep COF synchronized and respect RLV locks", OutfitChecks.ReplacementAndLayers),
+    ("Disconnect cancels pending outfit changes and scheduled appearance requests", OutfitChecks.DisconnectCancelsPendingChanges),
+    ("Capability callbacks keep SDK baking disabled and region refreshes never replay the outfit", OutfitChecks.CapabilitiesAndCrossings),
+    ("A partially rejected attachment replacement applies confirmed removals and retries without stacking", OutfitChecks.PartialReplacement),
+    ("Clothing layer gaps preserve append order and compact safely with canonical version refresh", OutfitChecks.ClothingOrderingGaps),
     ("Auto Sit preferences persist per resident/grid with safe defaults and incomplete UUID edits", AutoSitChecks.Preferences),
     ("Auto Sit waits one minute, keeps duplicate login deadlines and requires matching server seat confirmation", AutoSitChecks.TimingAndConfirmation),
     ("Disabling, disconnecting, logging out, new login or disposal cancel queued and active Auto Sit requests", AutoSitChecks.Cancellation),
@@ -1570,6 +1579,7 @@ var tests = new (string Name, Func<Task> Run)[]
     })
 };
 
+if (args.Contains("--outfit-checks")) tests = tests.Where(test => test.Run.Method.DeclaringType == typeof(OutfitChecks)).ToArray();
 int failed = 0;
 foreach (var (name, run) in tests)
 {
@@ -1644,7 +1654,7 @@ sealed class Fixture : IDisposable
 {
     public UUID Owner { get; } = UUID.Random();
     public GridClient Client { get; }
-    public CurrentOutfitFolder Outfit { get; }
+    public OutfitController Outfit { get; }
     public RlvSession Rlv { get; }
     public Simulator Simulator { get; }
     public Primitive Attachment { get; }
@@ -1671,8 +1681,7 @@ sealed class Fixture : IDisposable
         SharedFolder = Folder("Cuffs", shared.UUID);
         var objects = Folder("Objects", root.UUID);
         var cof = Folder("Current Outfit", root.UUID, FolderType.CurrentOutfit);
-        Outfit = session?.Outfit ?? new CurrentOutfitFolder(Client);
-        typeof(CurrentOutfitFolder).GetProperty(nameof(CurrentOutfitFolder.COF))!.SetValue(Outfit, cof);
+        Outfit = session?.Outfit ?? new OutfitController(Client);
         Object = new InventoryObject(UUID.Random()) { Name = "Cuffs (chest)", ParentUUID = objects.UUID, OwnerID = Owner,
             AssetType = AssetType.Object, InventoryType = InventoryType.Object, AttachPoint = AttachmentPoint.Chest };
         store.UpdateNodeFor(Object);

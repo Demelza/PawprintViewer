@@ -28,7 +28,7 @@ internal sealed partial class AccountSession : IDisposable
 
     public string Id { get; } = Guid.NewGuid().ToString("N");
     public GridClient Client { get; } = new();
-    public CurrentOutfitFolder Outfit { get; }
+    public OutfitController Outfit { get; }
     public RlvSession Rlv { get; }
     public NetCom Net { get; }
     public string Name { get; private set; } = "Connecting…";
@@ -65,7 +65,7 @@ internal sealed partial class AccountSession : IDisposable
         _restartRecovery.Changed += OnRegionRestartChanged;
         _restartRecovery.Returned += AutoSitOnRestartReturn;
         _seatAnimations = new SeatAnimationController(Client);
-        Outfit = new CurrentOutfitFolder(Client);
+        Outfit = new OutfitController(Client, InventoryLoading);
         Rlv = new RlvSession(Client, Outfit, _post, inventory: InventoryLoading);
         Rlv.Message += OnRlvMessage;
         Rlv.Changed += OnRlvChanged;

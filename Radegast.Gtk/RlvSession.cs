@@ -10,7 +10,7 @@ namespace Radegast.Gtk;
 internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRlvQueryCallbacks, ICurrentOutfitPolicy
 {
     private readonly GridClient _client;
-    private readonly CurrentOutfitFolder _outfit;
+    private readonly OutfitController _outfit;
     private readonly InventoryLoader _inventory;
     private readonly bool _ownsInventoryLoader;
     private readonly Action<Action> _post;
@@ -34,7 +34,7 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
     public event Action? Changed;
     public event Action<string>? Message;
 
-    public RlvSession(GridClient client, CurrentOutfitFolder outfit, Action<Action> post, Action<int, string>? sendReply = null,
+    public RlvSession(GridClient client, OutfitController outfit, Action<Action> post, Action<int, string>? sendReply = null,
         InventoryLoader? inventory = null)
     {
         _client = client;
@@ -105,6 +105,10 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
 
     internal Task ProcessCommandAsync(string message, Guid source, string name) => QueueAsync(async (service, token) =>
     {
+        using var outfitBatch = message.Split(',').Any(c => c.EndsWith("=force", StringComparison.OrdinalIgnoreCase) &&
+            (c.TrimStart('@').StartsWith("attach", StringComparison.OrdinalIgnoreCase) ||
+             c.TrimStart('@').StartsWith("detach", StringComparison.OrdinalIgnoreCase) ||
+             c.TrimStart('@').StartsWith("remoutfit", StringComparison.OrdinalIgnoreCase))) ? _outfit.BeginBatch() : null;
         if (DebugCommands) Notify($"{name}: {message}");
         var processed = true;
         string? failure = null;

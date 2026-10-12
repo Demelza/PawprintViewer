@@ -48,6 +48,7 @@ internal sealed partial class AccountSession
         _inventoryWarmupCancel?.Dispose();
         _inventoryWarmupCancel = null;
         _inventoryWarmupStore = null;
+        Outfit.Reset();
         InventoryLoading.Reset();
         _inventoryCache.Stop();
     }

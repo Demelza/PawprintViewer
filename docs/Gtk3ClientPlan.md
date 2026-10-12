@@ -89,6 +89,31 @@ worker, coalesced after changes, and stop their timers when idle. Integration
 checks cover cold skeletons, SDK appearance link resolution, cache invalidation,
 foreign/corrupt data, early RLV actions, shared-request cancellation and login cleanup.
 
+## Current Outfit and appearance coordination
+
+`OutfitController` serializes live COF reads and mutations for each account. It
+uses AIS acknowledgements and canonical category versions, resolves links to
+actual inventory items, removes replaced items' links, and applies RLV policies
+before changing inventory. Its confirmed link snapshot supplies worn state.
+The SDK's automatic appearance pipeline is disabled to prevent concurrent outfit
+replays. Initial attachment restoration is additive and occurs once per login;
+subsequent attachment changes send individual differences.
+
+Second Life uses a separate server bake coordinator. RLV mutation batches defer
+baking until completion, followed by a two-second debounce. New changes cancel
+obsolete requests. Baking never restores attachments, and does not require a
+local rendered avatar. A version mismatch refreshes both COF content and version;
+transport failures receive bounded retries. Capabilities and region changes
+start appearance work, while disconnects cancel pending tasks and callbacks.
+Client baking remains available for regions without server baking.
+
+The behavioral reference is Firestorm's
+[appearance manager](https://github.com/FirestormViewer/phoenix-firestorm/blob/master/indra/newview/llappearancemgr.cpp)
+and [RLVa force-wear implementation](https://github.com/FirestormViewer/phoenix-firestorm/blob/master/indra/newview/rlvhelper.cpp).
+In particular, COF is fetched live at startup, and detached items' links must be
+removed before another appearance update can run. This is a C# implementation
+of those ordering principles, rather than a port of the full renderer or RLVa.
+
 ## Implementation boundaries
 
 1. Add a `net10.0` GTK3 executable that references `Radegast.Core` and uses

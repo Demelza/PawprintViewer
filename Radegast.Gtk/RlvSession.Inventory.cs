@@ -178,6 +178,7 @@ internal sealed partial class RlvSession
 
     private HashSet<UUID> WornIds()
     {
+        if (_outfit.IsReady) return _outfit.WornIds;
         var ids = _client.Appearance.GetWearables().Select(w => w.ItemID).ToHashSet();
         ids.UnionWith(_client.Appearance.GetAttachmentsByItemId().Keys);
         ids.UnionWith(_client.Self.ActiveGestures.Keys);
@@ -194,7 +195,7 @@ internal sealed partial class RlvSession
         var roots = MyAttachments()
             .Select(p => (Id: AttachmentItemId(p), Prim: p)).Where(p => p.Id != UUID.Zero)
             .GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First().Prim);
-        worn.UnionWith(roots.Keys);
+        if (!_outfit.IsReady) worn.UnionWith(roots.Keys);
         var shared = SharedRoot;
         var converted = new RlvSharedFolder(shared?.UUID.Guid ?? Guid.Empty, "#RLV");
         var sharedIds = new HashSet<UUID>();
@@ -325,8 +326,8 @@ internal sealed partial class RlvSession
         return Allowed(entry);
     }
 
-    // Bulk COF addition in LibreMetaverse 3.1.5 does not invoke CanAttach/CanDetach.
-    // Check additions and everything they would replace before calling that path.
+    // Check the requested point and every inventory alias before the outfit
+    // controller commits the confirmed change.
     public async Task AddAsync(InventoryItem item, AttachmentPoint? point, bool replace, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -366,15 +367,7 @@ internal sealed partial class RlvSession
             _requestedPoint.Value = actualPoint;
             try
             {
-                var links = await _outfit.GetCurrentOutfitLinksAsync(token).ConfigureAwait(false);
-                token.ThrowIfCancellationRequested();
-                if (!CanAdd(item, actualPoint)) throw new InvalidOperationException("Adding this item is restricted by RLV.");
-                if (links.Any(link => link.ResolvedItemID == real.UUID) && !_client.Appearance.GetAttachmentsByItemId().ContainsKey(real.UUID))
-                {
-                    _client.Appearance.Attach(real, actualPoint, replace);
-                    await ReportItemChangeAsync(new() { real }, null, token).ConfigureAwait(false);
-                }
-                else await _outfit.AttachAsync(real, actualPoint, replace, token).ConfigureAwait(false);
+                await _outfit.AttachAsync(real, actualPoint, replace, token).ConfigureAwait(false);
             }
             finally { _requestedPoint.Value = previous; }
         }

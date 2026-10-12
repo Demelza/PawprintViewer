@@ -14,9 +14,19 @@ sealed class InventoryServer : HttpMessageHandler
     public TaskCompletionSource? Gate { get; set; }
     public HashSet<UUID> FailedFolders { get; } = new();
     public HashSet<UUID> MalformedFolders { get; } = new();
+    private readonly GridClient _client;
+    private readonly Dictionary<string, Uri> _caps;
+    public List<int> BakeVersions { get; } = new();
+    public HashSet<UUID> FailedDeletes { get; } = new();
+    public bool FailCreates { get; set; }
+    public TaskCompletionSource? BakeGate { get; set; }
+    public TaskCompletionSource? CreateGate { get; set; }
+    public bool IgnoreBakeCancellation { get; set; }
+    public int CreatedLinks { get; private set; }
 
     public InventoryServer(GridClient client, Simulator simulator)
     {
+        _client = client;
         Snapshot(client.Inventory.Store!.RootFolder!);
         client.HttpCapsClient.Dispose();
         client.HttpCapsClient = new HttpCapsClient(this);
@@ -26,6 +36,8 @@ sealed class InventoryServer : HttpMessageHandler
             .GetValue(simulator.Caps)!;
         caps["FetchInventoryDescendents2"] = new Uri("https://inventory.test/folders");
         caps["FetchInventory2"] = new Uri("https://inventory.test/items");
+        caps["InventoryAPIv3"] = new Uri("https://inventory.test/ais");
+        _caps = caps;
 
         void Snapshot(InventoryFolder folder)
         {
@@ -46,11 +58,79 @@ sealed class InventoryServer : HttpMessageHandler
         }
     }
 
+    public void EnableAppearance() => _caps["UpdateAvatarAppearance"] = new Uri("https://inventory.test/bake");
+    public void SetVersion(UUID folder, int version) => _folders[folder]["version"] = version;
+    public HashSet<UUID> LinkedItems(UUID folder) => ((OSDArray)_folders[folder]["items"]).Cast<OSDMap>()
+        .Where(i => i["type"].AsInteger() == (int)AssetType.Link).Select(i => i["asset_id"].AsUUID()).ToHashSet();
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
     {
-        var payload = (OSDMap)OSDParser.Deserialize(await request.Content!.ReadAsByteArrayAsync(token));
+        var payload = request.Content == null ? new OSDMap() : (OSDMap)OSDParser.Deserialize(await request.Content.ReadAsByteArrayAsync(token));
         OSDMap reply;
-        if (request.RequestUri!.AbsolutePath == "/folders")
+        var path = request.RequestUri!.AbsolutePath;
+        if (path == "/bake")
+        {
+            var version = payload["cof_version"].AsInteger();
+            BakeVersions.Add(version);
+            if (BakeGate != null) await BakeGate.Task.WaitAsync(IgnoreBakeCancellation ? CancellationToken.None : token);
+            var cof = _client.Inventory.Store!.GetContents(_client.Inventory.Store.RootFolder!.UUID).OfType<InventoryFolder>()
+                .Single(f => f.PreferredType == FolderType.CurrentOutfit);
+            var expected = _folders[cof.UUID]["version"].AsInteger();
+            reply = version == expected ? new() { ["success"] = true, ["cof_version"] = version }
+                : new() { ["success"] = false, ["expected"] = expected };
+        }
+        else if (path.StartsWith("/ais/item/"))
+        {
+            var id = new UUID(path.Split('/').Last());
+            if (FailedDeletes.Contains(id)) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("failure") };
+            var item = _items[id];
+            var parent = item["parent_id"].AsUUID();
+            var folder = _folders[parent];
+            if (request.Method == HttpMethod.Patch)
+            {
+                item["desc"] = payload["desc"];
+                foreach (OSDMap child in (OSDArray)folder["items"])
+                    if (child["item_id"].AsUUID() == id) child["desc"] = payload["desc"];
+                var updatedVersion = folder["version"].AsInteger() + 1;
+                folder["version"] = updatedVersion;
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(OSDParser.SerializeLLSDXmlString(
+                    new OSDMap { ["_updated_category_versions"] = new OSDMap { [parent.ToString()] = updatedVersion } })) };
+            }
+            folder["items"] = new OSDArray(((OSDArray)folder["items"]).Where(i => ((OSDMap)i)["item_id"].AsUUID() != id).ToList());
+            _items.Remove(id);
+            folder["descendents"] = ((OSDArray)folder["items"]).Count;
+            var version = folder["version"].AsInteger() + 1;
+            folder["version"] = version;
+            reply = new() { ["_removed_items"] = new OSDArray { id },
+                ["_updated_category_versions"] = new OSDMap { [parent.ToString()] = version } };
+        }
+        else if (path.StartsWith("/ais/category/"))
+        {
+            CreatedLinks++;
+            if (CreateGate != null) await CreateGate.Task.WaitAsync(token);
+            if (FailCreates) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("failure") };
+            var parent = new UUID(path.Split('/').Last());
+            var created = new OSDMap();
+            foreach (OSDMap source in (OSDArray)payload["links"])
+            {
+                var link = new InventoryItem(UUID.Random()) { Name = source["name"], Description = source["desc"],
+                    OwnerID = _client.Self.AgentID, ParentUUID = parent, AssetUUID = source["linked_id"],
+                    AssetType = AssetType.Link, InventoryType = (InventoryType)source["inv_type"].AsInteger() };
+                var data = Item(link);
+                data["linked_id"] = link.AssetUUID;
+                data["agent_id"] = link.OwnerID;
+                created[link.UUID.ToString()] = data;
+                _items[link.UUID] = data;
+                ((OSDArray)_folders[parent]["items"]).Add(data);
+            }
+            var folder = _folders[parent];
+            folder["descendents"] = ((OSDArray)folder["items"]).Count;
+            var version = folder["version"].AsInteger() + 1;
+            folder["version"] = version;
+            reply = new() { ["_embedded"] = new OSDMap { ["links"] = created },
+                ["_updated_category_versions"] = new OSDMap { [parent.ToString()] = version } };
+        }
+        else if (path == "/folders")
         {
             var folders = new OSDArray();
             foreach (OSDMap entry in (OSDArray)payload["folders"])

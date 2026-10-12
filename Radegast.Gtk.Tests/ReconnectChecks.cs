@@ -212,6 +212,7 @@ internal sealed class ReconnectHarness : IDisposable
     public bool HoldPosts { get; set; }
     public (string Name, string Uri, string Password, StartLocationType Location, string Token, string Hash) ObservedLast { get; private set; }
     private readonly Queue<Action> _posts = new();
+    private readonly object _postGate = new();
 
     public ReconnectHarness(ReconnectClock? clock = null, string name = "Alice Resident", string uri = "https://grid.test/login",
         Action<Action>? post = null)
@@ -220,7 +221,17 @@ internal sealed class ReconnectHarness : IDisposable
         Name = name;
         Grid = new("test", "Test Grid", uri);
         Store = new(DirectoryPath);
-        Account = new(action => { if (HoldPosts) _posts.Enqueue(action); else if (post != null) post(action); else action(); }, Store, Clock);
+        Account = new(action =>
+        {
+            // Match GTK's serial UI dispatcher even when SDK packet handlers
+            // deliver their callbacks concurrently on worker threads.
+            lock (_postGate)
+            {
+                if (HoldPosts) _posts.Enqueue(action);
+                else if (post != null) post(action);
+                else action();
+            }
+        }, Store, Clock);
         Fixture = new(Account);
         Fixture.CapturePackets();
         Account.Net.ClientLoggingIn += (_, e) =>
@@ -247,7 +258,7 @@ internal sealed class ReconnectHarness : IDisposable
         Raise("OnClientDisconnected", new DisconnectedEventArgs(reason, "Synthetic disconnect"));
     }
     public void LoggedOut() { Connected(false); Raise("OnClientLoggedOut", EventArgs.Empty); }
-    public void DrainPosts() { while (_posts.TryDequeue(out var action)) action(); }
+    public void DrainPosts() { lock (_postGate) while (_posts.TryDequeue(out var action)) action(); }
     private void Progress(LoginStatus status, string reason) => Raise("OnClientLoginStatus", new LoginProgressEventArgs(status, "Synthetic login result", reason));
     private void Raise(string method, object args) => typeof(NetCom).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(Account.Net, new[] { args });
     private void Connected(bool value) => typeof(NetCom).GetProperty(nameof(NetCom.IsLoggedIn))!.SetValue(Account.Net, value);

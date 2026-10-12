@@ -353,6 +353,19 @@ disconnecting or reconnecting cancels old requests. Cache writes run outside
 GTK, are coalesced after changes, and do not poll or write while accounts are idle.
 The first session populates the cache; later logins benefit from the retained metadata.
 
+Outfit changes use one coordinator per account. COF link removals and additions
+are confirmed before sending attachment changes; link targets and the server's
+folder version are retained. RLV outfit commands defer baking until their changes
+finish, and requests are coalesced after two seconds of quiet. Completing a bake
+does not detach or reattach the outfit. Worn-state queries and inventory tags use
+the confirmed COF instead of stale wearable or attachment metadata.
+
+Second Life appearance requests do not wait for a rendered avatar. A COF version
+mismatch refreshes the live folder before retrying, rather than repeatedly sending
+an obsolete version. Disconnects cancel pending appearance work. Region changes
+request a fresh bake without replaying the initial attachment list. Regions
+without server baking retain the SDK's client baking path.
+
 For troubleshooting, enable **Show RLV commands and replies in Nearby Chat**
 in the Account Settings tab. Diagnostics include the actual command, discovered
 shared-root UUID, cached folder/item counts, and the reply sent on the script's channel.
@@ -372,6 +385,14 @@ The adapter's regression checks run without a display or grid login:
 
 ```sh
 dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj
+```
+
+The focused outfit checks cover repeated RLV swaps, late bake responses,
+inventory acknowledgement failures, clothing layers, attachment replacement,
+startup version mismatches, capabilities, region refreshes and cancellation:
+
+```sh
+dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --outfit-checks
 ```
 
 The map's native GTK scroll check requires a desktop display, but no login. It

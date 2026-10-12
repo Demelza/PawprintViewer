@@ -179,6 +179,7 @@ internal sealed class InventoryPanel : Box
         Client.Inventory.ItemReceived += OnItemReceived;
         Client.Appearance.AppearanceSet += OnAppearanceChanged;
         Client.Appearance.AgentWearablesReply += OnWearablesChanged;
+        _session.Outfit.Changed += OnOutfitChanged;
 
         // The inventory store is created by the login response, sometimes after the
         // session window. Retry briefly without blocking the GTK main loop.
@@ -267,6 +268,8 @@ internal sealed class InventoryPanel : Box
 
     private void OnAppearanceChanged(object? sender, AppearanceSetEventArgs e) =>
         GtkDispatch.Post(() => { if (!_disposed) ScheduleRebuild(); });
+
+    private void OnOutfitChanged() => GtkDispatch.Post(() => { if (!_disposed) ScheduleRebuild(); });
 
     private void OnWearablesChanged(object? sender, AgentWearablesReplyEventArgs e) =>
         GtkDispatch.Post(() => { if (!_disposed) ScheduleRebuild(); });
@@ -399,7 +402,12 @@ internal sealed class InventoryPanel : Box
         {
             try
             {
-                await _session.InventoryLoading.LoadFolderAsync(folderId, owner, CancellationToken.None, force);
+                if (_session.Outfit.COF?.UUID == folderId)
+                {
+                    if (force) await _session.Outfit.RefreshAsync(CancellationToken.None);
+                    else await _session.Outfit.GetCurrentOutfitLinksAsync(CancellationToken.None);
+                }
+                else await _session.InventoryLoading.LoadFolderAsync(folderId, owner, CancellationToken.None, force);
                 GtkDispatch.Post(() =>
                 {
                     if (_disposed || generation != _storeGeneration) return;
@@ -528,7 +536,7 @@ internal sealed class InventoryPanel : Box
                     target is InventoryWearable)
                     worn.Add(link.AssetUUID);
         }
-        _wornIds = worn;
+        _wornIds = _session.Outfit.IsReady ? _session.Outfit.WornIds : worn;
         foreach (var (button, id, display) in _searchButtons)
             button.Label = display + (IsWornId(id) ? " (worn)" : string.Empty);
     }
@@ -597,6 +605,7 @@ internal sealed class InventoryPanel : Box
     private bool IsKnownWorn(InventoryBase item)
     {
         var id = item is InventoryItem link && link.IsLink() ? link.AssetUUID : item.UUID;
+        if (_session.Outfit.IsReady) return _session.Outfit.WornIds.Contains(id);
         try
         {
             if (Client.Appearance.GetWearables().Any(w => w.ItemID == id)) return true;
@@ -688,7 +697,8 @@ internal sealed class InventoryPanel : Box
             {
                 try
                 {
-                    await _session.InventoryLoading.LoadFolderAsync(id, Client.Self.AgentID, token);
+                    if (_session.Outfit.COF?.UUID == id) await _session.Outfit.GetCurrentOutfitLinksAsync(token);
+                    else await _session.InventoryLoading.LoadFolderAsync(id, Client.Self.AgentID, token);
                 }
                 catch (OperationCanceledException) { throw; }
                 catch { Interlocked.Increment(ref failedFolders); }
@@ -1045,6 +1055,7 @@ internal sealed class InventoryPanel : Box
             Client.Inventory.ItemReceived -= OnItemReceived;
             Client.Appearance.AppearanceSet -= OnAppearanceChanged;
             Client.Appearance.AgentWearablesReply -= OnWearablesChanged;
+            _session.Outfit.Changed -= OnOutfitChanged;
         }
         DetachStoreEvents();
     }

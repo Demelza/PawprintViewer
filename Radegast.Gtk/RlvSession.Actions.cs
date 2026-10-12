@@ -25,6 +25,7 @@ internal sealed partial class RlvSession
 
     public async Task AttachAsync(IReadOnlyList<AttachmentRequest> requests, CancellationToken token)
     {
+        using var batch = _outfit.BeginBatch();
         foreach (var request in requests)
         {
             token.ThrowIfCancellationRequested();
@@ -40,6 +41,7 @@ internal sealed partial class RlvSession
 
     public async Task DetachAsync(IReadOnlyList<Guid> items, CancellationToken token)
     {
+        using var batch = _outfit.BeginBatch();
         foreach (var id in items)
         {
             token.ThrowIfCancellationRequested();
