@@ -69,6 +69,26 @@ account and connection state.
   above `is online` or `is offline`. Popups have no action buttons.
 - Image and asset previews load only when their content is opened.
 
+## Inventory metadata cache and startup loading
+
+Each account/grid has an atomic compressed metadata cache in the XDG cache
+directory. Restoring happens after the SDK builds the authoritative login folder
+skeleton and before connecting to the simulator. A matching owner, root, folder
+version and parent are required; fresh server data wins. Root and Current Outfit
+contents are excluded. Complete folders and partial link-target metadata are
+tracked separately, so missing contents remain fetchable. Cached items preserve
+their concrete types, permissions, timestamps and attachment/wearable flags.
+Files have format, size and entry limits; invalid data falls back to server fetches.
+
+One shared loader deduplicates folder requests across RLV and inventory browsing,
+batches missing items, waits for startup capabilities and preserves failed
+folders as retryable. Successful full refreshes reconcile deletions. Disconnect
+resets cancel old downloads. Startup warms live COF targets and the immediate
+shared root; it does not crawl every outfit. Cache saves are serialized on a
+worker, coalesced after changes, and stop their timers when idle. Integration
+checks cover cold skeletons, SDK appearance link resolution, cache invalidation,
+foreign/corrupt data, early RLV actions, shared-request cancellation and login cleanup.
+
 ## Implementation boundaries
 
 1. Add a `net10.0` GTK3 executable that references `Radegast.Core` and uses

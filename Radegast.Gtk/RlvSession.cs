@@ -11,6 +11,8 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
 {
     private readonly GridClient _client;
     private readonly CurrentOutfitFolder _outfit;
+    private readonly InventoryLoader _inventory;
+    private readonly bool _ownsInventoryLoader;
     private readonly Action<Action> _post;
     private readonly Action<int, string> _sendReply;
     private readonly Channel<Work> _commands = Channel.CreateUnbounded<Work>(new() { SingleReader = true });
@@ -32,10 +34,13 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
     public event Action? Changed;
     public event Action<string>? Message;
 
-    public RlvSession(GridClient client, CurrentOutfitFolder outfit, Action<Action> post, Action<int, string>? sendReply = null)
+    public RlvSession(GridClient client, CurrentOutfitFolder outfit, Action<Action> post, Action<int, string>? sendReply = null,
+        InventoryLoader? inventory = null)
     {
         _client = client;
         _outfit = outfit;
+        _inventory = inventory ?? new InventoryLoader(client);
+        _ownsInventoryLoader = inventory == null;
         _post = post;
         _sendReply = sendReply ?? ((channel, message) =>
         {
@@ -268,6 +273,7 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
             _commands.Writer.TryComplete();
         }
         _outfit.RemovePolicy(this);
+        if (_ownsInventoryLoader) _inventory.Dispose();
         _ = _worker.ContinueWith(_ =>
         {
             _lifetime.Dispose();

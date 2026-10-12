@@ -312,13 +312,19 @@ internal static class RegionRestartChecks
         f.Receive(Warning("Home", "Seconds", 60));
         f.Receive(Warning("Home"));
         MapNameRequestPacket? lookup = null;
-        await WaitUntil(() => (lookup ??= packets().OfType<MapNameRequestPacket>().SingleOrDefault()) != null);
+        await WaitUntil(() => (lookup ??= packets().OfType<MapNameRequestPacket>()
+            .FirstOrDefault(packet => Utils.BytesToString(packet.NameData.Name) == "safe")) != null);
         Check(Utils.BytesToString(lookup!.NameData.Name) == "safe", "Restart lookup used a wrong region");
         f.Receive(new MapBlockReplyPacket
         {
             Data = new[] { new MapBlockReplyPacket.DataBlock { Name = Utils.StringToBytes("Safe"), X = 1001, Y = 1200, Access = (byte)SimAccess.PG } }
         });
-        await WaitUntil(() => Field<int>(h.Account, "_mapTeleportInProgress") == 1);
+        try { await WaitUntil(() => Field<int>(h.Account, "_mapTeleportInProgress") == 1); }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Restart departure stalled: {h.Account.RestartTeleportStatus}; " +
+                $"connected={h.Account.IsConnected}; known regions={string.Join(", ", h.Account.Client.Grid.RegionsReadOnly.Keys)}", ex);
+        }
         TeleportLocationRequestPacket? request = null;
         await WaitUntil(() =>
         {

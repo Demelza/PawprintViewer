@@ -209,7 +209,9 @@ and a password-save failure is reported in that account's Nearby Chat.
 - Offer TP sends that account's current location to the friend. When RLV hides
   location, offers are available only to friends already granted map rights.
 - Inventory folder browsing, item details, and per-folder refresh. Folders load
-  when opened. The Library is shown when the grid provides it.
+  when opened. Previously loaded item metadata is cached per account and grid;
+  folder versions from the next login determine which contents can be reused.
+  The Library is shown when the grid provides it.
 - **Search all** fetches My Inventory folders on demand, then searches their
   names. Results are capped at 500 displayed matches.
 - Create folders, rename ordinary items or folders, and move them to Trash.
@@ -333,6 +335,23 @@ locks on the same item linked in another folder. Failed folder responses remain
 retryable, and a missing shared root is checked against the server before an
 empty listing is returned. Current Outfit link targets are fetched even when
 the actual wearable is outside `#RLV`.
+
+Inventory metadata is saved automatically under
+`$XDG_CACHE_HOME/pawprint-viewer/inventory/` (normally
+`~/.cache/pawprint-viewer/inventory/`). The compressed cache contains no passwords,
+textures, or saved worn state. Changed, moved, deleted, incomplete, and unknown-version
+folders are fetched as needed; cached link-target metadata can also come from
+partially loaded folders without marking those folders complete. Current Outfit
+always comes from the server, so logging in with an outfit changed in another
+viewer does not reapply an old outfit. Corrupt or incompatible cache files are ignored.
+
+Login prefetch prioritizes Current Outfit link targets and the immediate `#RLV`
+root, without downloading the entire inventory or every outfit. RLV and the
+inventory browser share folder requests and reuse loaded contents. Commands sent
+before inventory capabilities arrive wait briefly for them (up to 30 seconds);
+disconnecting or reconnecting cancels old requests. Cache writes run outside
+GTK, are coalesced after changes, and do not poll or write while accounts are idle.
+The first session populates the cache; later logins benefit from the retained metadata.
 
 For troubleshooting, enable **Show RLV commands and replies in Nearby Chat**
 in the Account Settings tab. Diagnostics include the actual command, discovered

@@ -21,6 +21,13 @@ if (args.Contains("--memory-smoke", StringComparer.Ordinal)) return NativeMemory
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Inventory cache restores typed metadata and resolves RLV/appearance links without redundant downloads", InventoryCacheChecks.RoundTripAndAppearance),
+    ("Inventory cache rejects changed, moved and deleted folders while preserving complete/partial distinctions", InventoryCacheChecks.InvalidationsAndPartialFolders),
+    ("Inventory cache isolates accounts/grids and safely ignores corrupt, truncated or foreign data", InventoryCacheChecks.IsolationAndCorruption),
+    ("Inventory requests share downloads, cancel individual waiters safely and reconcile deletions and failed parsing", InventoryCacheChecks.CoalescingCancellationAndRefresh),
+    ("Early RLV commands wait for inventory capabilities and session resets cancel old startup requests", InventoryCacheChecks.EarlyRlvAndReset),
+    ("Inventory cache batches disk writes, stops subscriptions and leaves idle accounts without polling timers", InventoryCacheChecks.SavingAndIdleResources),
+    ("Account login restores after the authoritative skeleton, warms COF targets and cancels cache work on disconnect", InventoryCacheChecks.AccountLoginLifecycle),
     ("Auto Sit preferences persist per resident/grid with safe defaults and incomplete UUID edits", AutoSitChecks.Preferences),
     ("Auto Sit waits one minute, keeps duplicate login deadlines and requires matching server seat confirmation", AutoSitChecks.TimingAndConfirmation),
     ("Disabling, disconnecting, logging out, new login or disposal cancel queued and active Auto Sit requests", AutoSitChecks.Cancellation),

@@ -44,7 +44,8 @@ internal sealed partial class AccountSession : IDisposable
     public event Action<AccountSession, ScriptMenu>? ScriptDialogReceived;
     public event Action<AccountSession, ScriptQuestionEventArgs>? PermissionRequested;
 
-    public AccountSession(Action<Action>? post = null, AccountSettingsStore? settingsStore = null, TimeProvider? clock = null)
+    public AccountSession(Action<Action>? post = null, AccountSettingsStore? settingsStore = null, TimeProvider? clock = null,
+        string? inventoryCacheDirectory = null)
     {
         // This client has no scene textures; map tiles use their own HTTP source.
         // LibreMetaverse 3.1.5 restarts its UDP texture loop with a cancelled
@@ -54,6 +55,8 @@ internal sealed partial class AccountSession : IDisposable
         _post = post ?? GtkDispatch.Post;
         _settingsStore = settingsStore ?? new AccountSettingsStore();
         _clock = clock ?? TimeProvider.System;
+        InventoryLoading = new InventoryLoader(Client);
+        _inventoryCache = new SessionInventoryCache(Client, new InventoryDiskCache(inventoryCacheDirectory), _clock);
         _restartNotifications = new RegionRestartNotifications(_clock, _post,
             () => !_disposed && IsConnected ? Client.Network.CurrentSim?.Handle : null,
             remaining => Notify(NotificationCategory.SimRestarts, "Sim restart", remaining, UUID.Zero));
@@ -63,7 +66,7 @@ internal sealed partial class AccountSession : IDisposable
         _restartRecovery.Returned += AutoSitOnRestartReturn;
         _seatAnimations = new SeatAnimationController(Client);
         Outfit = new CurrentOutfitFolder(Client);
-        Rlv = new RlvSession(Client, Outfit, _post);
+        Rlv = new RlvSession(Client, Outfit, _post, inventory: InventoryLoading);
         Rlv.Message += OnRlvMessage;
         Rlv.Changed += OnRlvChanged;
         Net = new NetCom(Client);
@@ -96,6 +99,7 @@ internal sealed partial class AccountSession : IDisposable
         Net.LoginOptions.LastName = parts.Length > 1 ? parts[1] : "Resident";
         Net.LoginOptions.Password = password;
         Net.LoginOptions.Grid = grid;
+        ResetInventoryLoading();
         ResetAutoSit();
         ResetReconnect();
         _restartRecovery.Cancel("Pending return cancelled by a new login.");
@@ -251,13 +255,18 @@ internal sealed partial class AccountSession : IDisposable
             if (status == LoginStatus.Success)
             {
                 AutoSitOnLogin();
+                BeginInventoryWarmup();
                 _friendPresence.Connected();
                 Name = Client.Self.Name;
                 Client.Self.RequestMuteList();
                 RequestGroups();
                 _ = RetrieveOfflineInstantMessagesAsync();
             }
-            else if (status == LoginStatus.Failed) ResetAutoSit();
+            else if (status == LoginStatus.Failed)
+            {
+                ResetAutoSit();
+                ResetInventoryLoading();
+            }
             StateChanged?.Invoke(this);
             LoginProgress?.Invoke(this, status, message, reason);
         });
@@ -267,7 +276,11 @@ internal sealed partial class AccountSession : IDisposable
     {
         if ((success || reason == "mfa_challenge") && reply != null)
             Net.LoginOptions.MfaHash = reply.MfaHash;
-        if (success && reply != null) MapTileServer = WorldMapTileSource.ServerUri(reply.MapServerUrl);
+        if (success && reply != null)
+        {
+            MapTileServer = WorldMapTileSource.ServerUri(reply.MapServerUrl);
+            RestoreInventoryCache();
+        }
     }
 
     private void OnMoneyBalanceUpdated(object? sender, BalanceEventArgs e)
@@ -295,6 +308,7 @@ internal sealed partial class AccountSession : IDisposable
     {
         if (_disposed) return;
         Status = status;
+        ResetInventoryLoading();
         ResetAutoSit();
         Interlocked.Exchange(ref _serverTeleportBusyUntil, 0);
         _restartRecovery.Disconnected();
@@ -434,6 +448,9 @@ internal sealed partial class AccountSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        ResetInventoryLoading();
+        _inventoryCache.Dispose();
+        InventoryLoading.Dispose();
         ResetAutoSit();
         ResetReconnect();
         _restartRecovery.Changed -= OnRegionRestartChanged;

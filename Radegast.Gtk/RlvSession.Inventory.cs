@@ -47,29 +47,18 @@ internal sealed partial class RlvSession
     private InventoryFolder? SharedRoot => _client.Inventory.Store?.RootFolder is { } root
         ? Contents(root.UUID).OfType<InventoryFolder>().FirstOrDefault(f => f.Name == "#RLV") : null;
 
-    private async Task LoadFolderAsync(UUID id, CancellationToken token, bool force = false)
+    private Task LoadFolderAsync(UUID id, CancellationToken token, bool force = false) =>
+        _inventory.LoadFolderAsync(id, _client.Self.AgentID, token, force);
+
+    internal async Task WarmInventoryAsync(CancellationToken token)
     {
-        var store = _client.Inventory.Store;
-        if (store == null || !store.TryGetNodeFor(id, out var node) || (!force && !node.NeedsUpdate)) return;
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(15));
-        bool? success = null;
-        void Updated(object? _, FolderUpdatedEventArgs e) { if (e.FolderID == id) success = e.Success; }
-        _client.Inventory.FolderUpdated += Updated;
-        try
-        {
-            await _client.Inventory.RequestFolderContentsAsync(id, _client.Self.AgentID, true, true,
-                InventorySortOrder.ByName, timeout.Token).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested();
-            // The library clears NeedsUpdate before parsing children. A parsing failure
-            // must stay retryable instead of turning a partially loaded folder into an empty one.
-            if (success != true || node.NeedsUpdate)
-            {
-                node.NeedsUpdate = true;
-                throw new InvalidOperationException($"Inventory folder '{node.Data?.Name ?? id.ToString()}' could not be loaded. Try again shortly.");
-            }
-        }
-        finally { _client.Inventory.FolderUpdated -= Updated; }
+        await _inventory.WaitForCapabilityAsync("FetchInventoryDescendents2", token).ConfigureAwait(false);
+        // Prioritize worn link targets, which appearance also needs. Do not crawl
+        // every outfit on login: uncached folders remain available on demand.
+        var links = await _outfit.GetCurrentOutfitLinksAsync(token).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
+        await LoadLinkTargetsAsync(links, token).ConfigureAwait(false);
+        if (SharedRoot is { } shared) await LoadFolderAsync(shared.UUID, token).ConfigureAwait(false);
     }
 
     private async Task<UUID?> LoadSharedPathAsync(InventoryFolder shared, string path, CancellationToken token)
@@ -127,22 +116,12 @@ internal sealed partial class RlvSession
         // Outfit folders commonly contain hundreds of links. Fetch targets in batches
         // rather than waiting for a separate HTTP request for every item.
         var missing = links.Where(i => Resolve(i) == null).Select(i => i.AssetUUID).Distinct().ToArray();
-        if (missing.Length > 0 && _client.Network.CurrentSim?.Caps?.CapabilityURI("FetchInventory2") == null)
-            throw new InvalidOperationException("Inventory item service is not ready. Try again shortly.");
-        foreach (var batch in missing.Chunk(50))
+        await _inventory.LoadItemsAsync(missing, token).ConfigureAwait(false);
+        if (DebugCommands && missing.Length > 0)
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-            timeout.CancelAfter(TimeSpan.FromSeconds(15));
-            await _client.Inventory.RequestFetchInventoryAsync(batch.ToDictionary(id => id, _ => _client.Self.AgentID),
-                cancellationToken: timeout.Token).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested();
-            if (timeout.IsCancellationRequested) throw new TimeoutException("Inventory link targets could not be loaded in time.");
-            if (DebugCommands)
-            {
-                var unresolved = batch.Count(id => _client.Inventory.Store == null ||
-                    !_client.Inventory.Store.TryGetValue(id, out InventoryBase? entry) || entry is not InventoryItem);
-                if (unresolved > 0) Notify($"The server did not return {unresolved} inventory link target(s); those links are unresolved.");
-            }
+            var unresolved = missing.Count(id => _client.Inventory.Store == null ||
+                !_client.Inventory.Store.TryGetValue(id, out InventoryBase? entry) || entry is not InventoryItem);
+            if (unresolved > 0) Notify($"The server did not return {unresolved} inventory link target(s); those links are unresolved.");
         }
     }
 

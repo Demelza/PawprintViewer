@@ -9,6 +9,9 @@ sealed class InventoryServer : HttpMessageHandler
     private readonly Dictionary<UUID, OSDMap> _folders = new();
     private readonly Dictionary<UUID, OSDMap> _items = new();
     public List<UUID> FolderRequests { get; } = new();
+    public List<UUID> ItemRequests { get; } = new();
+    public List<int> ItemBatchSizes { get; } = new();
+    public TaskCompletionSource? Gate { get; set; }
     public HashSet<UUID> FailedFolders { get; } = new();
     public HashSet<UUID> MalformedFolders { get; } = new();
 
@@ -71,10 +74,15 @@ sealed class InventoryServer : HttpMessageHandler
         else
         {
             var items = new OSDArray();
+            ItemBatchSizes.Add(((OSDArray)payload["items"]).Count);
             foreach (OSDMap entry in (OSDArray)payload["items"])
+            {
+                ItemRequests.Add(entry["item_id"].AsUUID());
                 if (_items.TryGetValue(entry["item_id"].AsUUID(), out var item)) items.Add(item);
+            }
             reply = new OSDMap { ["items"] = items };
         }
+        if (Gate != null) await Gate.Task.WaitAsync(token);
         return new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(OSDParser.SerializeLLSDXmlString(reply), System.Text.Encoding.UTF8, "application/llsd+xml")

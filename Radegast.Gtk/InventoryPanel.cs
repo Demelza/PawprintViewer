@@ -213,6 +213,7 @@ internal sealed class InventoryPanel : Box
         _selectedId = UUID.Zero;
         _wornIds.Clear();
         AttachStoreEvents();
+        RememberLoadedFolders(Store.RootFolder.UUID);
         _expanded.Add(Store.RootFolder.UUID);
         RebuildTree();
         FetchFolder(Store.RootFolder.UUID, false);
@@ -223,6 +224,19 @@ internal sealed class InventoryPanel : Box
             catch { return; }
             GtkDispatch.Post(() => { if (!_disposed && generation == _storeGeneration) ScheduleRebuild(); });
         });
+    }
+
+    private void RememberLoadedFolders(UUID root)
+    {
+        var pending = new Queue<UUID>();
+        var seen = new HashSet<UUID>();
+        pending.Enqueue(root);
+        while (pending.TryDequeue(out var id))
+        {
+            if (!seen.Add(id) || Store == null || !Store.TryGetNodeFor(id, out var node)) continue;
+            if (!node.NeedsUpdate) _fetched.Add(id);
+            foreach (var child in GetContents(id).OfType<InventoryFolder>()) pending.Enqueue(child.UUID);
+        }
     }
 
     private void AttachStoreEvents()
@@ -364,7 +378,12 @@ internal sealed class InventoryPanel : Box
     private void FetchFolder(UUID folderId, bool isLibrary, bool force = false)
     {
         if (_disposed || !_session.IsConnected || Store == null) return;
-        if (_fetching.Contains(folderId) || (!force && _fetched.Contains(folderId))) return;
+        if (_fetching.Contains(folderId)) return;
+        if (!force && Store.TryGetNodeFor(folderId, out var node) && !node.NeedsUpdate)
+        {
+            _fetched.Add(folderId);
+            return;
+        }
         _fetching.Add(folderId);
         var generation = _storeGeneration;
         _status.Text = "Loading folder…";
@@ -380,10 +399,7 @@ internal sealed class InventoryPanel : Box
         {
             try
             {
-                if (isLibrary)
-                    await Client.Inventory.FolderContentsAsync(folderId, owner, true, true, InventorySortOrder.ByName);
-                else
-                    await Client.Inventory.RequestFolderContentsAsync(folderId, owner, true, true, InventorySortOrder.ByName);
+                await _session.InventoryLoading.LoadFolderAsync(folderId, owner, CancellationToken.None, force);
                 GtkDispatch.Post(() =>
                 {
                     if (_disposed || generation != _storeGeneration) return;
@@ -672,8 +688,7 @@ internal sealed class InventoryPanel : Box
             {
                 try
                 {
-                    await Client.Inventory.RequestFolderContentsAsync(
-                        id, Client.Self.AgentID, true, true, InventorySortOrder.ByName, token);
+                    await _session.InventoryLoading.LoadFolderAsync(id, Client.Self.AgentID, token);
                 }
                 catch (OperationCanceledException) { throw; }
                 catch { Interlocked.Increment(ref failedFolders); }
