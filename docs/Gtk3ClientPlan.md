@@ -71,8 +71,10 @@ account and connection state.
 
 ## Inventory metadata cache and startup loading
 
-Each account/grid has an atomic compressed metadata cache in the XDG cache
-directory. Restoring happens after the SDK builds the authoritative login folder
+Each SL account has an atomic compressed metadata cache under the XDG settings
+root: `pawprint-viewer/<avatar.name>/cache/`. Other grids use a grid-specific
+subdirectory. A matching old XDG cache file is copied to the new location on
+restore, preserving the format and the old copy. Restoring happens after the SDK builds the authoritative login folder
 skeleton and before connecting to the simulator. A matching owner, root, folder
 version and parent are required; fresh server data wins. Root and Current Outfit
 contents are excluded. Complete folders and partial link-target metadata are
@@ -378,6 +380,23 @@ excluded. Names load in batches with bounded retries, and the full-height list
 updates while that account's Objects tab is visible. Connected neighboring
 regions use global coordinates so objects near a border have the correct range.
 
+`SceneObjectDiscovery` keeps the protocol camera at the avatar's position with
+a 64 m range, including skyboxes and seated parent transforms. It enables child
+regions and the server's `InterestList` mode `360` when available, without
+textures or rendering. Cached object announcements and orphaned linkset parents
+receive bounded retries; detected objects stop those requests. Refresh can reset
+the server's interest list. Timers, HTTP work and target queries stop on disconnect.
+The reference for the capability is the SL viewer's
+[region implementation](https://github.com/secondlife/viewer/blob/master/indra/newview/llviewerregion.cpp),
+and camera position/range follow the documented
+[AgentUpdate protocol](https://wiki.secondlife.com/wiki/AgentUpdate).
+
+RLV UUID queries can verify furniture through a simulator properties reply before
+its full prim data arrives. An unloaded sit uses the same per-account sit guard,
+accepts the server's linked-seat reply, then awaits that avatar's seat update.
+Distance restrictions require loaded position data; obsolete replies cannot
+complete disconnected or cancelled requests.
+
 Each row has **Touch** and **Sit** buttons to the left of its name and distance.
 Touch targets a touchable root or linked prim and is disabled for objects without
 touch handlers or when RLV prevents touching them. A **Stand** button above the
@@ -466,7 +485,12 @@ Enter also sends. Friends' IM buttons open/select their conversations; incoming
 resident messages create conversations without changing the selected one.
 Each account keeps its own conversations, histories, selection, and per-resident
 drafts while switching tabs and accounts. This state stays in memory for the
-current login; persistent message logs are not implemented. Each conversation
+current login. Accepted private IMs are also appended to UTF-8 files under
+`<avatar.name>/chats/`, with timestamps and both directions. A private UUID-to-file
+index preserves conversation identity through delayed names and filename collisions.
+Writes use a bounded background queue and drain at shutdown. Logs persist across
+updates without being loaded back into the UI's memory buffers. Blocked and group
+messages are excluded. Each conversation
 retains the newest 2,000 messages within a 1,000,000-character text budget.
 Nearby Chat uses the same count/text limits; profile text remains complete.
 Stream indices keep the renderer advancing after old messages are removed.

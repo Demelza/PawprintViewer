@@ -54,9 +54,11 @@ internal sealed partial class AccountSession : IDisposable
         Client.Settings.TexturePipeline.Enabled = false;
         _post = post ?? GtkDispatch.Post;
         _settingsStore = settingsStore ?? new AccountSettingsStore();
+        _imTranscripts = new(_settingsStore.StoragePaths, message => Logger.Warn(message, Client));
         _clock = clock ?? TimeProvider.System;
+        _objectDiscovery = new SceneObjectDiscovery(Client);
         InventoryLoading = new InventoryLoader(Client);
-        _inventoryCache = new SessionInventoryCache(Client, new InventoryDiskCache(inventoryCacheDirectory), _clock);
+        _inventoryCache = new SessionInventoryCache(Client, new InventoryDiskCache(inventoryCacheDirectory, _settingsStore.StoragePaths), _clock);
         _restartNotifications = new RegionRestartNotifications(_clock, _post,
             () => !_disposed && IsConnected ? Client.Network.CurrentSim?.Handle : null,
             remaining => Notify(NotificationCategory.SimRestarts, "Sim restart", remaining, UUID.Zero));
@@ -66,7 +68,8 @@ internal sealed partial class AccountSession : IDisposable
         _restartRecovery.Returned += AutoSitOnRestartReturn;
         _seatAnimations = new SeatAnimationController(Client);
         Outfit = new OutfitController(Client, InventoryLoading);
-        Rlv = new RlvSession(Client, Outfit, _post, inventory: InventoryLoading);
+        Rlv = new RlvSession(Client, Outfit, _post, inventory: InventoryLoading, discovery: _objectDiscovery,
+            sit: (id, token) => SitOnFurnitureAsync(id, token, true));
         Rlv.Message += OnRlvMessage;
         Rlv.Changed += OnRlvChanged;
         Net = new NetCom(Client);
@@ -429,6 +432,7 @@ internal sealed partial class AccountSession : IDisposable
                     {
                         _names[id] = name;
                         _requestedNames.Remove(id);
+                        if (_loginIdentity != null && _conversations.ContainsKey(id)) _imTranscripts.ResolveName(_loginIdentity, id, name);
                     }
                     _requestedFriendNames.Remove(id);
                 }
@@ -450,6 +454,8 @@ internal sealed partial class AccountSession : IDisposable
         _disposed = true;
         ResetInventoryLoading();
         _inventoryCache.Dispose();
+        _imTranscripts.Dispose();
+        _objectDiscovery.Dispose();
         InventoryLoading.Dispose();
         ResetAutoSit();
         ResetReconnect();

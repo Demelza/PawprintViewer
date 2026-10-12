@@ -13,6 +13,9 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
     private readonly OutfitController _outfit;
     private readonly InventoryLoader _inventory;
     private readonly bool _ownsInventoryLoader;
+    private readonly SceneObjectDiscovery _discovery;
+    private readonly bool _ownsDiscovery;
+    private readonly Func<UUID, CancellationToken, Task>? _sit;
     private readonly Action<Action> _post;
     private readonly Action<int, string> _sendReply;
     private readonly Channel<Work> _commands = Channel.CreateUnbounded<Work>(new() { SingleReader = true });
@@ -35,12 +38,16 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
     public event Action<string>? Message;
 
     public RlvSession(GridClient client, OutfitController outfit, Action<Action> post, Action<int, string>? sendReply = null,
-        InventoryLoader? inventory = null)
+        InventoryLoader? inventory = null, SceneObjectDiscovery? discovery = null,
+        Func<UUID, CancellationToken, Task>? sit = null)
     {
         _client = client;
         _outfit = outfit;
         _inventory = inventory ?? new InventoryLoader(client);
         _ownsInventoryLoader = inventory == null;
+        _discovery = discovery ?? new SceneObjectDiscovery(client);
+        _ownsDiscovery = discovery == null;
+        _sit = sit;
         _post = post;
         _sendReply = sendReply ?? ((channel, message) =>
         {
@@ -278,6 +285,7 @@ internal sealed partial class RlvSession : IDisposable, IRlvActionCallbacks, IRl
         }
         _outfit.RemovePolicy(this);
         if (_ownsInventoryLoader) _inventory.Dispose();
+        if (_ownsDiscovery) _discovery.Dispose();
         _ = _worker.ContinueWith(_ =>
         {
             _lifetime.Dispose();

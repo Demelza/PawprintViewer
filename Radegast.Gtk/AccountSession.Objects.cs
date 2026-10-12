@@ -14,13 +14,17 @@ internal sealed record NearbyObject(UUID Id, uint LocalId, Simulator Simulator,
 internal sealed partial class AccountSession
 {
     public const double ObjectRadius = 50;
+    private readonly SceneObjectDiscovery _objectDiscovery;
+    public void RefreshObjectDiscovery() => _objectDiscovery.Refresh(true);
     private int _sitInProgress;
     public bool IsSitting => Client.Self.SittingOn != 0 || Client.Self.Movement.SitOnGround;
 
     public IReadOnlyList<NearbyObject> GetNearbyObjects()
     {
         if (_disposed || !IsConnected || Client.Network.CurrentSim is not { } current) return Array.Empty<NearbyObject>();
-        var position = Client.Self.GlobalPosition;
+        var local = _objectDiscovery.TryPosition(out var validPosition) ? validPosition : Client.Self.Movement.Camera.Position;
+        Utils.LongToUInts(current.Handle, out var regionX, out var regionY);
+        var position = new Vector3d(regionX + (double)local.X, regionY + (double)local.Y, local.Z);
         var objects = new List<NearbyObject>();
         Simulator[] simulators;
         try { simulators = Client.Network.Simulators.ToArray(); }
@@ -140,7 +144,7 @@ internal sealed partial class AccountSession
         return false;
     }
 
-    private Task SitOnFurnitureAsync(UUID id, CancellationToken token)
+    private Task SitOnFurnitureAsync(UUID id, CancellationToken token, bool allowUnloaded = false)
     {
         token.ThrowIfCancellationRequested();
         if (_disposed || !IsConnected || Client.Network.CurrentSim is not { } current)
@@ -155,7 +159,79 @@ internal sealed partial class AccountSession
             if (furniture != null)
                 return SitOnObjectAsync(new(id, furniture.LocalID, sim, furniture.Properties?.Name ?? "Furniture", 0, false), token, false);
         }
+        if (allowUnloaded) return SitOnUnloadedObjectAsync(id, token);
         throw new InvalidOperationException("The furniture UUID was not found in the connected regions.");
+    }
+
+    private async Task SitOnUnloadedObjectAsync(UUID id, CancellationToken token)
+    {
+        var sim = await _objectDiscovery.LocateAsync(id, token).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The simulator did not find that furniture UUID.");
+        var loaded = _objectDiscovery.Find(id);
+        if (loaded is { } found && IsRezzedRoot(found.Prim))
+        {
+            await SitOnObjectAsync(new(id, found.Prim.LocalID, found.Sim, found.Prim.Properties?.Name ?? "Furniture", 0, false), token, false).ConfigureAwait(false);
+            return;
+        }
+        string? Error()
+        {
+            if (_disposed || !IsConnected || (sim != Client.Network.CurrentSim && !sim.Connected)) return "This account is disconnected or has changed regions.";
+            if (_objectDiscovery.Find(id) is { } candidate && (candidate.Prim.IsAttachment || candidate.Prim.PrimData.PCode == PCode.Avatar))
+                return "This UUID is not rezzed furniture.";
+            if (!Rlv.Enabled) return null;
+            var permissions = Rlv.Service.Permissions;
+            if (!permissions.CanSit() || IsSitting && (!permissions.CanUnsit() || !permissions.CanStandTp())) return "Sitting or leaving the current seat is restricted by RLV.";
+            if (permissions.CanSitTp(out _)) return "The furniture must finish loading before its distance can be checked against RLV.";
+            return null;
+        }
+        if (Error() is { } error) throw new InvalidOperationException(error);
+        if (Interlocked.CompareExchange(ref _sitInProgress, 1, 0) != 0) throw new InvalidOperationException("Another sit request is still waiting for the server.");
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var response = new TaskCompletionSource<UUID>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var seated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // The UUID has been confirmed by this simulator. A linked furniture
+        // seat can have a different UUID, and its prim may still be in transit.
+        // Only one sit request is allowed for this account until it completes.
+        void Reply(object? _, AvatarSitResponseEventArgs e) { if (e.ObjectID != UUID.Zero) response.TrySetResult(e.ObjectID); }
+        void ChangedSeat(object? _, AvatarSitChangedEventArgs e)
+        {
+            if (e.Avatar.ID != Client.Self.AgentID || e.Simulator != sim || e.SittingOn == 0 || !response.Task.IsCompletedSuccessfully) return;
+            if (!sim.ObjectsPrimitives.TryGetValue(e.SittingOn, out var seat) || seat.ID == response.Task.Result) seated.TrySetResult();
+        }
+        void Disconnect(object? _, DisconnectedEventArgs e) => cancel.Cancel();
+        void RegionChanged(object? _, SimChangedEventArgs e) => cancel.Cancel();
+        void RestrictionsChanged() { if (Error() != null) cancel.Cancel(); }
+        Client.Self.AvatarSitResponse += Reply;
+        Client.Objects.AvatarSitChanged += ChangedSeat;
+        Client.Network.Disconnected += Disconnect;
+        Client.Network.SimChanged += RegionChanged;
+        Rlv.Changed += RestrictionsChanged;
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            if (Error() is { } changed) throw new InvalidOperationException(changed);
+            Client.Network.SendPacket(new AgentRequestSitPacket
+            {
+                AgentData = { AgentID = Client.Self.AgentID, SessionID = Client.Self.SessionID },
+                TargetObject = { TargetID = id, Offset = Vector3.Zero }
+            }, sim);
+            await response.Task.WaitAsync(TimeSpan.FromSeconds(10), cancel.Token).ConfigureAwait(false);
+            cancel.Token.ThrowIfCancellationRequested();
+            if (Error() is { } latest) throw new InvalidOperationException(latest);
+            Client.Network.SendPacket(new AgentSitPacket { AgentData = { AgentID = Client.Self.AgentID, SessionID = Client.Self.SessionID } }, sim);
+            await seated.Task.WaitAsync(TimeSpan.FromSeconds(10), cancel.Token).ConfigureAwait(false);
+            if (Rlv.Enabled) await Rlv.Service.ReportSitAsync(id.Guid, cancel.Token).ConfigureAwait(false);
+        }
+        catch (TimeoutException) { throw new InvalidOperationException("The server did not confirm sitting on this object."); }
+        finally
+        {
+            Client.Self.AvatarSitResponse -= Reply;
+            Client.Objects.AvatarSitChanged -= ChangedSeat;
+            Client.Network.Disconnected -= Disconnect;
+            Client.Network.SimChanged -= RegionChanged;
+            Rlv.Changed -= RestrictionsChanged;
+            Interlocked.Exchange(ref _sitInProgress, 0);
+        }
     }
 
     public Task SitOnObjectAsync(NearbyObject item, CancellationToken token = default) => SitOnObjectAsync(item, token, true);

@@ -69,9 +69,10 @@ internal sealed partial class RlvSession
     public async Task SitAsync(Guid target, CancellationToken token)
     {
         var id = new UUID(target);
+        if (_sit != null) { await _sit(id, token).ConfigureAwait(false); return; }
         await WaitForAsync<AvatarSitResponseEventArgs>(
             h => _client.Self.AvatarSitResponse += h, h => _client.Self.AvatarSitResponse -= h,
-            () => _client.Self.RequestSit(id, Vector3.Zero), e => e.ObjectID == id, token).ConfigureAwait(false);
+            () => _client.Self.RequestSit(id, Vector3.Zero), e => e.ObjectID == id || FindRoot(e.ObjectID)?.ID == id, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         _client.Self.Sit();
         await Service.ReportSitAsync(target, token).ConfigureAwait(false);
@@ -166,7 +167,8 @@ internal sealed partial class RlvSession
         finally { unsubscribe(Reply); }
     }
 
-    public Task<bool> ObjectExistsAsync(Guid id, CancellationToken token) => Task.FromResult(FindObject(new UUID(id)) != null);
+    public async Task<bool> ObjectExistsAsync(Guid id, CancellationToken token) =>
+        await _discovery.LocateAsync(new UUID(id), token).ConfigureAwait(false) != null;
     public Task<bool> IsSittingAsync(CancellationToken token) =>
         Task.FromResult(_client.Self.SittingOn != 0 || _client.Self.Movement.SitOnGround);
     public Task<(bool Success, Guid SitId)> TryGetSitIdAsync(CancellationToken token) =>

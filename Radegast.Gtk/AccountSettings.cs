@@ -38,6 +38,7 @@ internal sealed class AccountSettingsStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     public string DirectoryPath { get; }
+    public AccountStoragePaths StoragePaths { get; }
 
     public AccountSettingsStore(string? directory = null)
     {
@@ -45,6 +46,7 @@ internal sealed class AccountSettingsStore
         if (string.IsNullOrEmpty(config) || !Path.IsPathFullyQualified(config))
             config = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
         DirectoryPath = Path.GetFullPath(directory ?? Path.Combine(config, "pawprint-viewer", "account-settings"));
+        StoragePaths = new(directory == null ? Path.Combine(config, "pawprint-viewer") : Path.Combine(DirectoryPath, "accounts"));
     }
 
     public string FilePath(SavedLogin account) => Path.Combine(DirectoryPath, account.SecretKey + ".json");

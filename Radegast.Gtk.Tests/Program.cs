@@ -21,6 +21,15 @@ if (args.Contains("--memory-smoke", StringComparer.Ordinal)) return NativeMemory
 // Integration checks for the GTK account adapter; no grid login or display is required.
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Account storage uses safe per-avatar settings folders and migrates valid inventory caches", AccountStorageChecks.PathsAndMigration),
+    ("IM transcripts persist directions, timestamps, Unicode and resolved filenames across writer restarts", AccountStorageChecks.TranscriptsAndNames),
+    ("Conversation filename collisions and unsafe resident names cannot mix peers or escape account storage", AccountStorageChecks.CollisionsAndPathSafety),
+    ("Account IM logging excludes blocked and group messages and survives disconnect", AccountStorageChecks.SessionImFiltering),
+    ("Object interest follows skybox and rotated furniture coordinates without scene textures", ObjectDiscoveryChecks.CameraAndSeatedPosition),
+    ("Cached placeholders and missing linkset parents are requested, retried and stop after recovery", ObjectDiscoveryChecks.CachedUpdatesAndMissingParents),
+    ("Object discovery enables 360 interest, resets on Refresh and cancels its lifecycle timer", ObjectDiscoveryChecks.InterestAndLifecycle),
+    ("RLV movers can sit on server-verified unstreamed UUIDs and linked seats with avatar confirmation", ObjectDiscoveryChecks.RlvSitOnUnstreamedFurniture),
+    ("Unstreamed RLV sits enforce distance locks and cancel cleanly on disconnect", ObjectDiscoveryChecks.RlvDistanceAndCancellation),
     ("Inventory cache restores typed metadata and resolves RLV/appearance links without redundant downloads", InventoryCacheChecks.RoundTripAndAppearance),
     ("Inventory cache rejects changed, moved and deleted folders while preserving complete/partial distinctions", InventoryCacheChecks.InvalidationsAndPartialFolders),
     ("Inventory cache isolates accounts/grids and safely ignores corrupt, truncated or foreign data", InventoryCacheChecks.IsolationAndCorruption),
@@ -1579,6 +1588,7 @@ var tests = new (string Name, Func<Task> Run)[]
     })
 };
 
+if (args.Contains("--objects-storage-checks")) tests = tests.Where(test => test.Run.Method.DeclaringType == typeof(ObjectDiscoveryChecks) || test.Run.Method.DeclaringType == typeof(AccountStorageChecks)).ToArray();
 if (args.Contains("--outfit-checks")) tests = tests.Where(test => test.Run.Method.DeclaringType == typeof(OutfitChecks)).ToArray();
 int failed = 0;
 foreach (var (name, run) in tests)

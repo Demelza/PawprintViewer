@@ -13,16 +13,22 @@ internal sealed class InventoryDiskCache
     private const long MaximumFileBytes = 64 * 1024 * 1024;
     private const int MaximumDecodedBytes = 256 * 1024 * 1024;
     public string DirectoryPath { get; }
+    private readonly AccountStoragePaths _paths;
+    private readonly bool _explicitDirectory;
+    private readonly string _legacyDirectory;
 
-    public InventoryDiskCache(string? directory = null)
+    public InventoryDiskCache(string? directory = null, AccountStoragePaths? paths = null, string? legacyDirectory = null)
     {
         var cache = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
         if (string.IsNullOrEmpty(cache) || !Path.IsPathFullyQualified(cache))
             cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache");
-        DirectoryPath = Path.GetFullPath(directory ?? Path.Combine(cache, "pawprint-viewer", "inventory"));
+        _paths = paths ?? new();
+        _explicitDirectory = directory != null;
+        DirectoryPath = Path.GetFullPath(directory ?? _paths.RootDirectory);
+        _legacyDirectory = Path.GetFullPath(legacyDirectory ?? Path.Combine(cache, "pawprint-viewer", "inventory"));
     }
 
-    public string FilePath(SavedLogin identity) => Path.Combine(DirectoryPath, identity.SecretKey + ".json.gz");
+    public string FilePath(SavedLogin identity) => Path.Combine(_explicitDirectory ? DirectoryPath : _paths.CacheDirectory(identity), identity.SecretKey + ".json.gz");
 
     public Snapshot Capture(SavedLogin identity, LibreMetaverse.Inventory store)
     {
@@ -70,6 +76,8 @@ internal sealed class InventoryDiskCache
     public int Restore(SavedLogin identity, LibreMetaverse.Inventory store)
     {
         var path = FilePath(identity);
+        var destination = path;
+        if (!File.Exists(path) && !_explicitDirectory) path = Path.Combine(_legacyDirectory, identity.SecretKey + ".json.gz");
         if (!File.Exists(path)) return 0;
         try
         {
@@ -86,7 +94,22 @@ internal sealed class InventoryDiskCache
             }
             decoded.Position = 0;
             var snapshot = JsonSerializer.Deserialize<Snapshot>(decoded);
-            return snapshot == null ? 0 : Apply(identity, store, snapshot);
+            if (snapshot == null) return 0;
+            var restored = Apply(identity, store, snapshot);
+            if (path != destination && snapshot.Format == Format && snapshot.Grid == SavedLogin.NormalizeUri(identity.LoginUri) &&
+                snapshot.Owner == store.Owner.Guid && snapshot.Root == store.RootFolder?.UUID.Guid)
+            {
+                // Preserve the old cache as a fallback. Migration is independent
+                // of folder validity and cannot make login fail.
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(path, destination, false);
+                    if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(destination, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+            return restored;
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or InvalidOperationException or ArgumentException)
         {
@@ -137,8 +160,8 @@ internal sealed class InventoryDiskCache
 
     public async Task SaveAsync(SavedLogin identity, Snapshot snapshot, CancellationToken token = default)
     {
-        Directory.CreateDirectory(DirectoryPath);
         var path = FilePath(identity);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {

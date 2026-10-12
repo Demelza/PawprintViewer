@@ -144,12 +144,18 @@ and a password-save failure is reported in that account's Nearby Chat.
   the current conversation. Histories, selected conversations, and unsent drafts
   remain separate for each account and resident. Conversations, the IM tab, and
   the account rail show unread counts; displaying a conversation marks it read.
-  Histories and drafts are kept in memory for the current login only.
+  The displayed histories and drafts stay in memory for the current login.
+  Accepted incoming and outgoing private IMs are also saved as timestamped UTF-8
+  transcripts in `~/.config/pawprint-viewer/<avatar.name>/chats/<peer.name>.txt`.
+  Unknown names use the peer UUID temporarily; resolving the name renames that
+  file. A UUID suffix distinguishes residents whose names collide. Logs append
+  across logins and viewer updates. Blocked messages and group chats are excluded.
 - To keep long sessions lightweight, Nearby Chat retains the newest **2,000
   messages**, and each IM/group conversation retains up to **2,000 messages**.
   A **1,000,000-character** budget per history can shorten that further for long
-  messages. Older messages leave the in-memory history; chat is not archived to
-  disk. Unsent drafts are preserved. Profile text is displayed in full.
+  messages. Older messages leave the in-memory history; saved private IM logs
+  remain on disk and are not reloaded into RAM. Unsent drafts are preserved.
+  Profile text is displayed in full.
 - IMs request offline delivery and retrieve stored offline messages after login.
   Private messages keep channel prefixes such as `/9` as literal text; channel
   commands belong in Nearby Chat.
@@ -227,8 +233,13 @@ and a password-save failure is reported in that account's Nearby Chat.
   Touch is disabled when neither the root nor its linked parts are touchable,
   or when RLV prevents touching it. Linked objects appear once; attachments
   are excluded. The list updates while displayed,
-  including objects in connected neighboring regions. **Refresh** retries
-  missing names. **Stand** becomes available while seated, including ground
+  including objects in connected neighboring regions. Detection follows the
+  avatar's position and altitude, requests all-direction interest where supported,
+  and retries missing cached updates and linkset parents without loading textures.
+  **Refresh** asks the simulator to refresh its interest list and retries names.
+  RLV movers can query a furniture UUID before its full object data arrives and
+  accept a linked seat's response while waiting for avatar seat confirmation.
+  **Stand** becomes available while seated, including ground
   sits. Sit/stand actions respect RLV locks and sitting-distance restrictions;
   sitting waits for server confirmation, and standing uses the existing
   furniture animation cleanup.
@@ -337,8 +348,14 @@ empty listing is returned. Current Outfit link targets are fetched even when
 the actual wearable is outside `#RLV`.
 
 Inventory metadata is saved automatically under
-`$XDG_CACHE_HOME/pawprint-viewer/inventory/` (normally
-`~/.cache/pawprint-viewer/inventory/`). The compressed cache contains no passwords,
+`$XDG_CONFIG_HOME/pawprint-viewer/<avatar.name>/cache/` (normally
+`~/.config/pawprint-viewer/<avatar.name>/cache/`). A valid existing cache in the
+old `~/.cache/pawprint-viewer/inventory/` location is copied automatically, so
+the location change does not require another cache build. Private IM transcripts
+use the adjacent `chats/` directory. Residents on other grids use a separate
+`<avatar.name>/grids/<grid-id>/` directory to keep identically named accounts apart.
+These paths are independent of the viewer's installation/build directory.
+The compressed cache contains no passwords,
 textures, or saved worn state. Changed, moved, deleted, incomplete, and unknown-version
 folders are fetched as needed; cached link-target metadata can also come from
 partially loaded folders without marking those folders complete. Current Outfit
@@ -393,6 +410,13 @@ startup version mismatches, capabilities, region refreshes and cancellation:
 
 ```sh
 dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --outfit-checks
+```
+
+Object interest updates, missing-parent/cache recovery, RLV mover seats,
+per-avatar cache migration and IM transcript persistence have focused checks:
+
+```sh
+dotnet run --project Radegast.Gtk.Tests/Radegast.Gtk.Tests.csproj -- --objects-storage-checks
 ```
 
 The map's native GTK scroll check requires a desktop display, but no login. It

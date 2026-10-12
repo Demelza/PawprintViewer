@@ -11,6 +11,17 @@ internal sealed class ImConversation(UUID peerId, UUID sessionId) : ChatConversa
 internal sealed partial class AccountSession
 {
     private readonly Dictionary<UUID, ImConversation> _conversations = new();
+    private readonly ImTranscriptStore _imTranscripts;
+    internal Task FlushImTranscriptsAsync() => _imTranscripts.FlushAsync();
+
+    private void SaveInstantMessage(UUID peer, ChatMessage message)
+    {
+        if (_loginIdentity == null) return;
+        string? name;
+        lock (_nameLock) name = _names.GetValueOrDefault(peer) ?? Client.Friends.FriendList.GetValueOrDefault(peer)?.Name;
+        _imTranscripts.Append(_loginIdentity, peer, name, message);
+        if (string.IsNullOrWhiteSpace(name)) RequestChatAvatarNames([peer]);
+    }
     public IReadOnlyList<ImConversation> Conversations => _conversations.Values.ToArray();
     public int UnreadInstantMessages => _conversations.Values.Sum(conversation => conversation.UnreadCount);
     public event Action<AccountSession, ImConversation>? ConversationChanged;
@@ -61,7 +72,9 @@ internal sealed partial class AccountSession
         // The default avatar IM API requests offline delivery as well as online delivery.
         // Chat channel prefixes are deliberately left as literal private-message text.
         Client.Self.InstantMessage(peerId, message, conversation.SessionId);
-        conversation.Append(new ChatMessage(DateTime.Now, message, true));
+        var line = new ChatMessage(DateTime.Now, message, true);
+        conversation.Append(line);
+        SaveInstantMessage(peerId, line);
         conversation.Draft = string.Empty;
         ConversationChanged?.Invoke(this, conversation);
     }
@@ -90,7 +103,9 @@ internal sealed partial class AccountSession
             if (!string.IsNullOrWhiteSpace(message.FromAgentName))
                 RememberAvatarName(message.FromAgentID, message.FromAgentName);
             var conversation = GetConversation(message.FromAgentID);
-            conversation.Append(new ChatMessage(ChatConversation.MessageTime(message.Timestamp), message.Message, false));
+            var line = new ChatMessage(ChatConversation.MessageTime(message.Timestamp), message.Message, false);
+            conversation.Append(line);
+            SaveInstantMessage(message.FromAgentID, line);
             conversation.UnreadCount++;
             ConversationChanged?.Invoke(this, conversation);
             Notify(NotificationCategory.InstantMessages, DisplayConversationName(message.FromAgentID),

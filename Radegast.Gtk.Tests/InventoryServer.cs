@@ -17,6 +17,8 @@ sealed class InventoryServer : HttpMessageHandler
     private readonly GridClient _client;
     private readonly Dictionary<string, Uri> _caps;
     public List<int> BakeVersions { get; } = new();
+    public List<string> InterestRequests { get; } = new();
+    public TaskCompletionSource? InterestGate { get; set; }
     public HashSet<UUID> FailedDeletes { get; } = new();
     public bool FailCreates { get; set; }
     public TaskCompletionSource? BakeGate { get; set; }
@@ -59,6 +61,7 @@ sealed class InventoryServer : HttpMessageHandler
     }
 
     public void EnableAppearance() => _caps["UpdateAvatarAppearance"] = new Uri("https://inventory.test/bake");
+    public void EnableInterest() => _caps["InterestList"] = new Uri("https://inventory.test/interest");
     public void SetVersion(UUID folder, int version) => _folders[folder]["version"] = version;
     public HashSet<UUID> LinkedItems(UUID folder) => ((OSDArray)_folders[folder]["items"]).Cast<OSDMap>()
         .Where(i => i["type"].AsInteger() == (int)AssetType.Link).Select(i => i["asset_id"].AsUUID()).ToHashSet();
@@ -68,7 +71,13 @@ sealed class InventoryServer : HttpMessageHandler
         var payload = request.Content == null ? new OSDMap() : (OSDMap)OSDParser.Deserialize(await request.Content.ReadAsByteArrayAsync(token));
         OSDMap reply;
         var path = request.RequestUri!.AbsolutePath;
-        if (path == "/bake")
+        if (path == "/interest")
+        {
+            InterestRequests.Add(request.Method == HttpMethod.Delete ? "reset" : payload["mode"].AsString());
+            if (InterestGate != null) await InterestGate.Task.WaitAsync(token);
+            reply = new() { ["success"] = true };
+        }
+        else if (path == "/bake")
         {
             var version = payload["cof_version"].AsInteger();
             BakeVersions.Add(version);

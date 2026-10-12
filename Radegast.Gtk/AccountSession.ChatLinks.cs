@@ -45,6 +45,7 @@ internal sealed partial class AccountSession
             if (_names.GetValueOrDefault(id) == name) return;
             _names[id] = name;
         }
+        if (_loginIdentity != null && _conversations.ContainsKey(id)) _imTranscripts.ResolveName(_loginIdentity, id, name);
         AvatarNamesChanged?.Invoke(this);
     }
 

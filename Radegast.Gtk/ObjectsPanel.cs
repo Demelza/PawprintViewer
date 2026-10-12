@@ -31,7 +31,7 @@ internal sealed class ObjectsPanel : Box
         _stand.Clicked += (_, _) => Stand();
         toolbar.PackStart(_stand, false, false, 0);
         var refresh = new Button("Refresh");
-        refresh.Clicked += (_, _) => { _nameRequests.Clear(); Refresh(); };
+        refresh.Clicked += (_, _) => { _nameRequests.Clear(); _session.RefreshObjectDiscovery(); Refresh(); };
         toolbar.PackStart(refresh, false, false, 0);
         PackStart(toolbar, false, false, 0);
         var scroll = new ScrolledWindow { Vexpand = true };
@@ -55,6 +55,7 @@ internal sealed class ObjectsPanel : Box
         if (_disposed) return;
         _displayed = displayed;
         if (!displayed) return;
+        _session.RefreshObjectDiscovery();
         if (!_active)
         {
             _active = true;

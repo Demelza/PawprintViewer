@@ -266,6 +266,7 @@ internal sealed class ReconnectHarness : IDisposable
     {
         Connected(false);
         Account.Dispose();
+        Account.FlushImTranscriptsAsync().GetAwaiter().GetResult();
         Fixture.Dispose();
         if (Directory.Exists(DirectoryPath)) Directory.Delete(DirectoryPath, true);
     }
@@ -295,9 +296,10 @@ internal sealed class ReconnectClock : TimeProvider
     private sealed class Timer(ReconnectClock clock, TimerCallback callback, object? state) : ITimer
     {
         public TimeSpan? Due { get; private set; }
-        public bool Change(TimeSpan dueTime, TimeSpan period) { Due = dueTime == Timeout.InfiniteTimeSpan ? null : clock._elapsed + dueTime; return true; }
-        public void Fire() { Due = null; callback(state); }
-        public void Dispose() => Due = null;
+        private TimeSpan _period = Timeout.InfiniteTimeSpan;
+        public bool Change(TimeSpan dueTime, TimeSpan period) { _period = period; Due = dueTime == Timeout.InfiniteTimeSpan ? null : clock._elapsed + dueTime; return true; }
+        public void Fire() { Due = _period == Timeout.InfiniteTimeSpan ? null : clock._elapsed + _period; callback(state); }
+        public void Dispose() { Due = null; _period = Timeout.InfiniteTimeSpan; }
         public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
     }
 }

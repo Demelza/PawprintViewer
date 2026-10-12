@@ -28,5 +28,6 @@ internal static class Program
         var window = new MainWindow();
         window.ShowAll();
         Application.Run();
+        ImTranscriptStore.FlushAllAsync().GetAwaiter().GetResult();
     }
 }
